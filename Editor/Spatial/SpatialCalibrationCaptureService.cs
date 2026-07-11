@@ -69,8 +69,6 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             camera.clearFlags = CameraClearFlags.SolidColor;
             camera.backgroundColor = new Color(0.055f, 0.06f, 0.07f);
             camera.allowHDR = true;
-            var overlay = cameraObject.AddComponent<SpatialCaptureOverlayRenderer>();
-            overlay.Configure(session, report, evidence);
 
             var renderTexture = RenderTexture.GetTemporary(CaptureSize, CaptureSize, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
             var previous = RenderTexture.active;
@@ -81,6 +79,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 camera.Render();
                 RenderTexture.active = renderTexture;
                 texture.ReadPixels(new Rect(0, 0, CaptureSize, CaptureSize), 0, 0, false);
+                if (evidence) DrawEvidence(texture, camera, session, report);
                 texture.Apply(false, false);
                 var path = Path.Combine(directory, name + ".png");
                 File.WriteAllBytes(path, texture.EncodeToPNG());
@@ -93,6 +92,83 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 RenderTexture.ReleaseTemporary(renderTexture);
                 UnityEngine.Object.DestroyImmediate(texture);
                 UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        private static void DrawEvidence(Texture2D texture, Camera camera, SpatialCalibrationSession session, SpatialCalibrationReport report)
+        {
+            var subject = session.SubjectObject.transform;
+            var boxColor = new Color(0.15f, 1f, 0.35f);
+            foreach (var proxy in session.Geometry.collisionProxies)
+            {
+                var center = subject.TransformPoint(proxy.localCenter);
+                var rotation = subject.rotation * proxy.localRotation;
+                var size = Vector3.Scale(proxy.size, subject.lossyScale);
+                var corners = BoxCorners(center, rotation, size);
+                var edges = new[] { 0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7 };
+                for (var i = 0; i < edges.Length; i += 2)
+                    DrawWorldLine(texture, camera, corners[edges[i]], corners[edges[i + 1]], boxColor, 2);
+            }
+
+            if (report?.contacts == null) return;
+            foreach (var contact in report.contacts)
+            {
+                var point = SpatialContractArrays.Vector(contact.contact_point);
+                var contactColor = contact.valid ? new Color(1f, 0.78f, 0.12f) : new Color(1f, 0.2f, 0.12f);
+                DrawWorldLine(texture, camera, point - Vector3.right * 0.07f, point + Vector3.right * 0.07f, contactColor, 2);
+                DrawWorldLine(texture, camera, point - Vector3.up * 0.07f, point + Vector3.up * 0.07f, contactColor, 2);
+                var rule = session.Rules.FirstOrDefault(value => value.id == contact.rule_id);
+                if (rule == null) continue;
+                var normal = subject.TransformDirection(session.Frame(rule.frame_id).localNormal).normalized;
+                DrawWorldArrow(texture, camera, point, point + normal * 0.32f, new Color(0.2f, 0.65f, 1f));
+            }
+        }
+
+        private static Vector3[] BoxCorners(Vector3 center, Quaternion rotation, Vector3 size)
+        {
+            var extent = size * 0.5f;
+            var corners = new[]
+            {
+                new Vector3(-extent.x,-extent.y,-extent.z), new Vector3(extent.x,-extent.y,-extent.z), new Vector3(extent.x,extent.y,-extent.z), new Vector3(-extent.x,extent.y,-extent.z),
+                new Vector3(-extent.x,-extent.y,extent.z), new Vector3(extent.x,-extent.y,extent.z), new Vector3(extent.x,extent.y,extent.z), new Vector3(-extent.x,extent.y,extent.z)
+            };
+            for (var i = 0; i < corners.Length; i++) corners[i] = center + rotation * corners[i];
+            return corners;
+        }
+
+        private static void DrawWorldArrow(Texture2D texture, Camera camera, Vector3 start, Vector3 end, Color color)
+        {
+            var a = camera.WorldToScreenPoint(start);
+            var b = camera.WorldToScreenPoint(end);
+            if (a.z <= 0f || b.z <= 0f) return;
+            DrawPixelLine(texture, a, b, color, 2);
+            var direction = ((Vector2)b - (Vector2)a).normalized;
+            var side = new Vector2(-direction.y, direction.x);
+            var tip = (Vector2)b;
+            DrawPixelLine(texture, tip, tip - direction * 12f + side * 6f, color, 2);
+            DrawPixelLine(texture, tip, tip - direction * 12f - side * 6f, color, 2);
+        }
+
+        private static void DrawWorldLine(Texture2D texture, Camera camera, Vector3 start, Vector3 end, Color color, int thickness)
+        {
+            var a = camera.WorldToScreenPoint(start);
+            var b = camera.WorldToScreenPoint(end);
+            if (a.z <= 0f || b.z <= 0f) return;
+            DrawPixelLine(texture, a, b, color, thickness);
+        }
+
+        private static void DrawPixelLine(Texture2D texture, Vector2 start, Vector2 end, Color color, int thickness)
+        {
+            var steps = Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(Mathf.Abs(end.x - start.x), Mathf.Abs(end.y - start.y))));
+            for (var step = 0; step <= steps; step++)
+            {
+                var point = Vector2.Lerp(start, end, step / (float)steps);
+                var x = Mathf.RoundToInt(point.x);
+                var y = Mathf.RoundToInt(point.y);
+                for (var dx = -thickness; dx <= thickness; dx++)
+                for (var dy = -thickness; dy <= thickness; dy++)
+                    if (x + dx >= 0 && x + dx < texture.width && y + dy >= 0 && y + dy < texture.height)
+                        texture.SetPixel(x + dx, y + dy, color);
             }
         }
 
