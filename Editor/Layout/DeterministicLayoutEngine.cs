@@ -1,0 +1,376 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+namespace UnityDecoScene.DungeonDecorator.Editor
+{
+    public static class DeterministicLayoutEngine
+    {
+        private const int CandidateAttempts = 72;
+
+        public static LayoutResult Generate(RoomCompositionPlan plan, IReadOnlyList<PlacedDecorItem> lockedPlacements = null)
+        {
+            if (plan == null) throw new ArgumentNullException(nameof(plan));
+            if (plan.Room == null || plan.Room.AuthoringBounds == null) throw new InvalidOperationException("The composition plan needs a room with authoring bounds.");
+            if (plan.Catalog == null) throw new InvalidOperationException("The composition plan needs a decor catalog.");
+
+            var result = new LayoutResult();
+            if (lockedPlacements != null)
+            {
+                foreach (var locked in lockedPlacements.Where(item => item != null && item.locked))
+                {
+                    result.Placements.Add(ClonePlacement(locked));
+                }
+            }
+
+            var random = new System.Random(plan.Seed);
+            var orderedElements = plan.Elements
+                .Where(element => element != null)
+                .OrderBy(element => RoleOrder(element.role))
+                .ThenBy(element => element.elementId, StringComparer.Ordinal)
+                .ToList();
+            var activeStyleSet = ResolveStyleSet(plan, orderedElements);
+
+            foreach (var element in orderedElements)
+            {
+                var descriptor = plan.Catalog.Find(element.descriptorId);
+                if (descriptor == null || descriptor.Prefab == null)
+                {
+                    AddGap(result, element, activeStyleSet, "The requested descriptor or prefab is missing.", 0);
+                    continue;
+                }
+
+                if (!descriptor.HasRole(element.role))
+                {
+                    AddGap(result, element, activeStyleSet, $"The asset is not reviewed for the {element.role} role.", 0);
+                    continue;
+                }
+
+                if (descriptor.Geometry == null || !descriptor.Geometry.IsUsable)
+                {
+                    AddGap(result, element, activeStyleSet, "GEOMETRY_UNREVIEWED: the asset geometry profile must be reviewed before placement.", 0);
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(activeStyleSet) && !string.Equals(descriptor.StyleSet, activeStyleSet, StringComparison.OrdinalIgnoreCase))
+                {
+                    AddGap(result, element, activeStyleSet, $"Style set '{descriptor.StyleSet}' does not match '{activeStyleSet}'.", 0);
+                    continue;
+                }
+
+                var densityMultiplier = element.role is DecorRole.Clutter or DecorRole.DecalCue
+                    ? Mathf.Lerp(0.5f, 1.5f, plan.Density)
+                    : 1f;
+                var requestedCount = Mathf.Clamp(Mathf.RoundToInt(Mathf.Max(1, element.count) * densityMultiplier), 1, descriptor.MaximumInstancesPerRoom);
+                for (var instanceIndex = 0; instanceIndex < requestedCount; instanceIndex++)
+                {
+                    if (result.Placements.Any(item => item.elementId == element.elementId && item.instanceIndex == instanceIndex && item.locked))
+                        continue;
+
+                    var placed = TryPlace(plan, element, descriptor, instanceIndex, random, result.Placements);
+                    if (placed != null) result.Placements.Add(placed);
+                    else AddGap(result, element, activeStyleSet, "No collision-free candidate satisfied the room and composition constraints.", 0, 1);
+                }
+            }
+
+            return result;
+        }
+
+        private static PlacedDecorItem TryPlace(RoomCompositionPlan plan, CompositionElement element, DecorAssetDescriptor descriptor, int instanceIndex, System.Random random, IReadOnlyList<PlacedDecorItem> placed)
+        {
+            Candidate? best = null;
+            for (var attempt = 0; attempt < CandidateAttempts; attempt++)
+            {
+                if (!TryCreateCandidate(plan.Room, element, descriptor, instanceIndex, attempt, random, placed, out var candidate)) continue;
+                if (!IsCandidateValid(plan.Room, descriptor, element, candidate, placed)) continue;
+
+                candidate.Score = ScoreCandidate(plan.Room, element, candidate, placed);
+                if (!best.HasValue || candidate.Score > best.Value.Score) best = candidate;
+            }
+
+            if (!best.HasValue) return null;
+            var chosen = best.Value;
+            return new PlacedDecorItem
+            {
+                placementId = $"{element.elementId}:{instanceIndex}",
+                elementId = element.elementId,
+                instanceIndex = instanceIndex,
+                role = element.role,
+                relation = element.relation,
+                descriptor = descriptor,
+                position = chosen.Position,
+                rotation = chosen.Rotation,
+                scale = chosen.Scale,
+                worldBounds = chosen.Bounds,
+                surfaceId = chosen.Surface != null ? chosen.Surface.SurfaceId : string.Empty,
+                contactEvidence = chosen.Contact,
+                locked = element.locked
+            };
+        }
+
+        private static bool TryCreateCandidate(ConceptRoom room, CompositionElement element, DecorAssetDescriptor descriptor, int instanceIndex, int attempt, System.Random random, IReadOnlyList<PlacedDecorItem> placed, out Candidate candidate)
+        {
+            candidate = default;
+            var box = room.AuthoringBounds;
+            var scalar = Mathf.Lerp(descriptor.MinimumScale, descriptor.MaximumScale, (float)random.NextDouble());
+            var scale = Vector3.one * scalar;
+            var yaw = ResolveYaw(descriptor, random);
+            var localPoint = SampleLocalPoint(box, element.preferredZone, descriptor.Surface, random);
+            var rotation = box.transform.rotation * Quaternion.Euler(0f, yaw, 0f);
+            var worldPoint = box.transform.TransformPoint(localPoint);
+
+            var anchor = FindAnchor(element, placed);
+            if (anchor != null && element.relation is CompositionRelation.Surrounds or CompositionRelation.Supports or CompositionRelation.ScatteredNear or CompositionRelation.Faces)
+            {
+                var angle = (instanceIndex * 137.5f + attempt * 47f + (float)random.NextDouble() * 30f) * Mathf.Deg2Rad;
+                var distance = Mathf.Max(0.2f, element.spacing) * Mathf.Lerp(0.75f, 1.25f, (float)random.NextDouble());
+                worldPoint = anchor.position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * distance;
+                if (element.relation == CompositionRelation.Faces)
+                {
+                    var direction = anchor.position - worldPoint;
+                    direction.y = 0f;
+                    if (direction.sqrMagnitude > 0.001f) rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+                }
+            }
+
+            var requirement = descriptor.Geometry.contact.requirement;
+            var surfaceType = requirement switch
+            {
+                ContactRequirement.WallBacked or ContactRequirement.WallMounted => RoomSurfaceType.Wall,
+                ContactRequirement.CeilingMounted => RoomSurfaceType.Ceiling,
+                _ => RoomSurfaceType.Floor
+            };
+            var surfaces = room.GetReviewedSurfaces(surfaceType).OrderBy(value => value.SurfaceId, StringComparer.Ordinal).ToArray();
+            if (requirement != ContactRequirement.FreeStanding && surfaces.Length == 0) return false;
+            RoomSurface targetSurface = surfaces.Length > 0 ? surfaces[(attempt + instanceIndex) % surfaces.Length] : null;
+            ContactEvidence contact = null;
+            if (requirement != ContactRequirement.FreeStanding)
+            {
+                var profile = descriptor.Geometry;
+                var frame = requirement is ContactRequirement.WallBacked or ContactRequirement.WallMounted ? profile.backContact : profile.bottomContact;
+                rotation = SpatialGeometryUtility.AlignContactFrame(profile, targetSurface);
+                if (surfaceType == RoomSurfaceType.Floor)
+                    rotation = Quaternion.AngleAxis(yaw, targetSurface.Normal) * rotation;
+                var halfWidth = Mathf.Min(targetSurface.Size.x * 0.45f, Mathf.Max(0f, targetSurface.Size.x * 0.5f - frame.size.x * scalar * 0.5f));
+                var halfHeight = Mathf.Min(targetSurface.Size.y * 0.45f, Mathf.Max(0f, targetSurface.Size.y * 0.5f - frame.size.y * scalar * 0.5f));
+                var horizontal = Mathf.Lerp(-halfWidth, halfWidth, (float)random.NextDouble());
+                var vertical = Mathf.Lerp(-halfHeight, halfHeight, (float)random.NextDouble());
+                var surfacePoint = targetSurface.Point(horizontal, vertical);
+                var targetGap = requirement == ContactRequirement.FloorSupported ? 0f : (profile.contact.minimumGap + profile.contact.maximumGap) * 0.5f;
+                worldPoint = SpatialGeometryUtility.PlaceContactAtSurface(profile, frame, targetSurface, surfacePoint, rotation, scale, targetGap);
+                contact = SpatialGeometryUtility.EvaluateContact(descriptor, worldPoint, rotation, scale, targetSurface);
+                if (!contact.valid) return false;
+            }
+
+            var boxes = SpatialGeometryUtility.BuildWorldObbs(descriptor, worldPoint, rotation, scale);
+            var bounds = SpatialGeometryUtility.CombinedAabb(boxes);
+            candidate = new Candidate(worldPoint, rotation, scale, bounds, targetSurface, contact, 0f);
+            return true;
+        }
+
+        private static Vector3 SampleLocalPoint(BoxCollider box, PreferredZone zone, PlacementSurface surface, System.Random random)
+        {
+            var min = box.center - box.size * 0.5f;
+            var max = box.center + box.size * 0.5f;
+            float Range(float a, float b) => Mathf.Lerp(a, b, (float)random.NextDouble());
+
+            var x = Range(min.x, max.x);
+            var z = Range(min.z, max.z);
+            switch (zone)
+            {
+                case PreferredZone.Focal:
+                    x = Range(box.center.x - box.size.x * 0.18f, box.center.x + box.size.x * 0.18f);
+                    z = Range(box.center.z, box.center.z + box.size.z * 0.3f);
+                    break;
+                case PreferredZone.Center:
+                    x = Range(box.center.x - box.size.x * 0.25f, box.center.x + box.size.x * 0.25f);
+                    z = Range(box.center.z - box.size.z * 0.25f, box.center.z + box.size.z * 0.25f);
+                    break;
+                case PreferredZone.Perimeter:
+                    SetPerimeter(ref x, ref z, min, max, random);
+                    break;
+                case PreferredZone.Corner:
+                    x = random.Next(0, 2) == 0 ? Range(min.x, min.x + box.size.x * 0.18f) : Range(max.x - box.size.x * 0.18f, max.x);
+                    z = random.Next(0, 2) == 0 ? Range(min.z, min.z + box.size.z * 0.18f) : Range(max.z - box.size.z * 0.18f, max.z);
+                    break;
+            }
+
+            if (surface == PlacementSurface.Wall) SetPerimeter(ref x, ref z, min, max, random);
+            var y = surface == PlacementSurface.Ceiling ? max.y : surface == PlacementSurface.Wall ? Range(min.y + box.size.y * 0.2f, max.y - box.size.y * 0.2f) : min.y;
+            return new Vector3(x, y, z);
+        }
+
+        private static void SetPerimeter(ref float x, ref float z, Vector3 min, Vector3 max, System.Random random)
+        {
+            switch (random.Next(0, 4))
+            {
+                case 0: x = min.x; break;
+                case 1: x = max.x; break;
+                case 2: z = min.z; break;
+                default: z = max.z; break;
+            }
+        }
+
+        private static Quaternion ResolveWallRotation(BoxCollider box, Vector3 localPoint)
+        {
+            var local = localPoint - box.center;
+            var normalizedX = Mathf.Abs(local.x) / Mathf.Max(0.001f, box.size.x * 0.5f);
+            var normalizedZ = Mathf.Abs(local.z) / Mathf.Max(0.001f, box.size.z * 0.5f);
+            Vector3 localInward;
+            if (normalizedX > normalizedZ) localInward = local.x < 0f ? Vector3.right : Vector3.left;
+            else localInward = local.z < 0f ? Vector3.forward : Vector3.back;
+            return Quaternion.LookRotation(box.transform.TransformDirection(localInward), box.transform.up);
+        }
+
+        private static bool IsCandidateValid(ConceptRoom room, DecorAssetDescriptor descriptor, CompositionElement element, Candidate candidate, IReadOnlyList<PlacedDecorItem> placed)
+        {
+            if (!room.ContainsBounds(candidate.Bounds, candidate.Surface != null)) return false;
+
+            foreach (var zone in room.KeepClearZones)
+            {
+                if (zone != null && zone.WorldBounds.Intersects(candidate.Bounds)) return false;
+            }
+
+            foreach (var existing in placed)
+            {
+                if (existing == null) continue;
+                var padding = Mathf.Max(descriptor.Clearance, existing.descriptor != null ? existing.descriptor.Clearance : 0f);
+                var candidateBoxes = SpatialGeometryUtility.BuildWorldObbs(descriptor, candidate.Position, candidate.Rotation, candidate.Scale, padding);
+                var existingBoxes = SpatialGeometryUtility.BuildWorldObbs(existing.descriptor, existing.position, existing.rotation, existing.scale, padding);
+                if (SpatialGeometryUtility.Intersects(existingBoxes, candidateBoxes)) return false;
+                if (descriptor.ForbiddenAssetIds.Contains(existing.descriptor != null ? existing.descriptor.AssetId : string.Empty)) return false;
+                if (existing.descriptor != null && existing.descriptor.ForbiddenAssetIds.Contains(descriptor.AssetId)) return false;
+            }
+
+            if (element.relation == CompositionRelation.Avoids)
+            {
+                var anchor = FindAnchor(element, placed);
+                if (anchor != null && Vector3.Distance(anchor.position, candidate.Position) < Mathf.Max(0.1f, element.spacing)) return false;
+            }
+
+            return true;
+        }
+
+        private static float ScoreCandidate(ConceptRoom room, CompositionElement element, Candidate candidate, IReadOnlyList<PlacedDecorItem> placed)
+        {
+            var score = 1f;
+            var box = room.AuthoringBounds;
+            var local = box.transform.InverseTransformPoint(candidate.Bounds.center) - box.center;
+            var normalizedX = Mathf.Abs(local.x) / Mathf.Max(0.001f, box.size.x * 0.5f);
+            var normalizedZ = Mathf.Abs(local.z) / Mathf.Max(0.001f, box.size.z * 0.5f);
+
+            score += element.preferredZone switch
+            {
+                PreferredZone.Center => (1f - Mathf.Max(normalizedX, normalizedZ)) * 2f,
+                PreferredZone.Focal => (1f - Mathf.Max(normalizedX, normalizedZ)) * 1.5f,
+                PreferredZone.Perimeter => Mathf.Max(normalizedX, normalizedZ) * 2f,
+                PreferredZone.Corner => Mathf.Min(normalizedX, normalizedZ) * 2f,
+                _ => 0.5f
+            };
+
+            var anchor = FindAnchor(element, placed);
+            if (anchor != null)
+            {
+                var distance = Vector3.Distance(anchor.position, candidate.Position);
+                var target = Mathf.Max(0.2f, element.spacing);
+                score += Mathf.Max(0f, 2f - Mathf.Abs(distance - target));
+            }
+
+            foreach (var observation in room.ObservationPoints)
+            {
+                if (observation == null) continue;
+                var direction = candidate.Bounds.center - observation.transform.position;
+                var dot = Vector3.Dot(observation.transform.forward, direction.normalized);
+                if (element.role == DecorRole.Hero) score += Mathf.Max(0f, dot) * (observation.Primary ? 4f : 2f);
+                else if (dot > 0.85f) score -= candidate.Bounds.extents.magnitude * 0.1f;
+            }
+
+            return score;
+        }
+
+        private static float ResolveYaw(DecorAssetDescriptor descriptor, System.Random random)
+        {
+            if ((descriptor.Rotation & RotationMode.RandomYaw) != 0) return (float)random.NextDouble() * 360f;
+            if ((descriptor.Rotation & RotationMode.QuarterTurns) != 0) return random.Next(0, 4) * 90f;
+            return 0f;
+        }
+
+        private static PlacedDecorItem FindAnchor(CompositionElement element, IReadOnlyList<PlacedDecorItem> placed)
+        {
+            if (string.IsNullOrWhiteSpace(element.anchorElementId)) return null;
+            return placed.FirstOrDefault(item => item != null && item.elementId == element.anchorElementId);
+        }
+
+        private static string ResolveStyleSet(RoomCompositionPlan plan, IEnumerable<CompositionElement> elements)
+        {
+            foreach (var element in elements.OrderBy(value => value.role == DecorRole.Hero ? 0 : 1))
+            {
+                var descriptor = plan.Catalog.Find(element.descriptorId);
+                if (descriptor != null && !string.IsNullOrWhiteSpace(descriptor.StyleSet)) return descriptor.StyleSet;
+            }
+            return string.Empty;
+        }
+
+        private static int RoleOrder(DecorRole role) => role switch
+        {
+            DecorRole.Hero => 0,
+            DecorRole.Support => 1,
+            DecorRole.StoryEvidence => 2,
+            DecorRole.LightingCue => 3,
+            DecorRole.DecalCue => 4,
+            _ => 5
+        };
+
+        private static void AddGap(LayoutResult result, CompositionElement element, string styleSet, string reason, int available, int requestedOverride = -1)
+        {
+            result.AssetGaps.gaps.Add(new AssetGap
+            {
+                role = element.role,
+                styleSet = styleSet,
+                reason = reason,
+                requestedCount = requestedOverride >= 0 ? requestedOverride : Mathf.Max(1, element.count),
+                availableCount = available
+            });
+        }
+
+        private static PlacedDecorItem ClonePlacement(PlacedDecorItem source) => new()
+        {
+            placementId = source.placementId,
+            elementId = source.elementId,
+            instanceIndex = source.instanceIndex,
+            role = source.role,
+            relation = source.relation,
+            descriptor = source.descriptor,
+            position = source.position,
+            rotation = source.rotation,
+            scale = source.scale,
+            worldBounds = source.worldBounds,
+            surfaceId = source.surfaceId,
+            contactEvidence = source.contactEvidence,
+            locked = source.locked
+        };
+
+        private struct Candidate
+        {
+            public Vector3 Position;
+            public Quaternion Rotation;
+            public Vector3 Scale;
+            public Bounds Bounds;
+            public RoomSurface Surface;
+            public ContactEvidence Contact;
+            public float Score;
+
+            public Candidate(Vector3 position, Quaternion rotation, Vector3 scale, Bounds bounds, RoomSurface surface, ContactEvidence contact, float score)
+            {
+                Position = position;
+                Rotation = rotation;
+                Scale = scale;
+                Bounds = bounds;
+                Surface = surface;
+                Contact = contact;
+                Score = score;
+            }
+        }
+    }
+}

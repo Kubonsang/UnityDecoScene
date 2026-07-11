@@ -1,0 +1,29 @@
+{
+  "name": "com.unitydecoscene.dungeon-decorator",
+  "version": "0.2.0",
+  "displayName": "Unity Concept Room Decorator",
+  "description": "Editor-first concept room dressing with deterministic placement, validation, visual capture, and MCP tools for Codex and Claude Code.",
+  "unity": "6000.0",
+  "dependencies": {
+    "com.unity.test-framework": "1.6.0",
+    "com.unity.modules.physics": "1.0.0",
+    "com.unity.modules.imageconversion": "1.0.0"
+  },
+  "keywords": [
+    "level-design",
+    "dungeon",
+    "decoration",
+    "mcp",
+    "editor"
+  ],
+  "author": {
+    "name": "UnityDecoScene"
+  },
+  "samples": [
+    {
+      "displayName": "Concept Room Starter",
+      "description": "A minimal starter scene setup guide and sample concept assets.",
+      "path": "Samples~/ConceptRoomStarter"
+    }
+  ]
+}

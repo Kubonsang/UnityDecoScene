@@ -1,0 +1,22 @@
+{
+  "name": "UnityDecoScene.DungeonDecorator.Editor.Tests",
+  "rootNamespace": "UnityDecoScene.DungeonDecorator.Tests",
+  "references": [
+    "UnityDecoScene.DungeonDecorator.Runtime",
+    "UnityDecoScene.DungeonDecorator.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
