@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace UnityDecoScene.DungeonDecorator.Editor
 {
@@ -54,7 +56,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private static string Render(string directory, string name, Vector3 position, Quaternion rotation, bool orthographic, Bounds bounds, SpatialCalibrationSession session, SpatialCalibrationReport report, bool evidence)
         {
             var cameraObject = new GameObject("Spatial Calibration Capture Camera") { hideFlags = HideFlags.HideAndDontSave };
+            var calibrationScene = session.SubjectObject.scene;
+            if (calibrationScene.IsValid()) SceneManager.MoveGameObjectToScene(cameraObject, calibrationScene);
             var camera = cameraObject.AddComponent<Camera>();
+            if (calibrationScene.IsValid()) camera.overrideSceneCullingMask = EditorSceneManager.GetSceneCullingMask(calibrationScene);
             camera.transform.SetPositionAndRotation(position, rotation);
             camera.orthographic = orthographic;
             camera.orthographicSize = Mathf.Max(0.5f, Mathf.Max(bounds.extents.x, bounds.extents.y) * 1.2f);

@@ -146,6 +146,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 "capture_preview_views" => CapturePreviewViews(),
                 "submit_visual_review" => SubmitVisualReview(Parse<VisualReviewArgs>(argumentsJson)),
                 "discard_preview" => DiscardPreview(),
+                "begin_spatial_calibration" => BeginSpatialCalibration(Parse<BeginSpatialCalibrationArgs>(argumentsJson)),
                 "inspect_spatial_calibration" => InspectSpatialCalibration(),
                 "capture_spatial_calibration" => CaptureSpatialCalibration(),
                 "get_spatial_contract_draft" => GetSpatialContractDraft(),
@@ -344,6 +345,24 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             });
         }
 
+        private static BridgeResponse BeginSpatialCalibration(BeginSpatialCalibrationArgs args)
+        {
+            if (args == null || string.IsNullOrWhiteSpace(args.descriptorAssetPath))
+                return BridgeResponse.Fail("descriptorAssetPath is required.");
+            var descriptor = LoadAsset<DecorAssetDescriptor>(args.descriptorAssetPath);
+            if (descriptor == null || descriptor.Prefab == null)
+                return BridgeResponse.Fail("The requested DecorAssetDescriptor or its prefab was not found.");
+            if (!Enum.TryParse(args.template, true, out SpatialCalibrationTemplate template))
+                return BridgeResponse.Fail("template must be WallMounted, WallBackedFloorSupported, FloorSupported, or SupportedBy.");
+            var target = LoadAsset<GameObject>(args.targetPrefabPath);
+            if (template == SpatialCalibrationTemplate.SupportedBy && target == null)
+                return BridgeResponse.Fail("SupportedBy requires targetPrefabPath.");
+
+            SpatialCalibrationSession.Begin(descriptor, target, template);
+            SpatialCalibrationWindow.Open();
+            return InspectSpatialCalibration();
+        }
+
         private static BridgeResponse CaptureSpatialCalibration()
         {
             var session = SpatialCalibrationSession.Current;
@@ -455,6 +474,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class LockArgs { public string[] ids; public bool locked = true; }
         [Serializable] private sealed class VisualReviewArgs { public int mood; public int style; public int story; public int composition; public string feedback; }
         [Serializable] private sealed class SpatialProposalArgs { public string proposalJson; }
+        [Serializable] private sealed class BeginSpatialCalibrationArgs { public string descriptorAssetPath; public string template; public string targetPrefabPath; }
         [Serializable] private sealed class CreatePreviewArgs { public string roomId; public string briefAssetPath; public string catalogAssetPath; public int seed = 12345; public float density = 0.5f; public CompositionElementDto[] elements; }
         [Serializable] private sealed class CompositionElementDto { public string elementId; public string descriptorId; public string role; public string relation; public string anchorElementId; public int count = 1; public string preferredZone; public float spacing = 1f; public bool locked; }
         [Serializable] private sealed class RoomInfoDto { public string roomId; public string objectName; public Vector3 boundsCenter; public Vector3 boundsSize; public int floorColliderCount; public int surfaceCount; public int reviewedSurfaceCount; public int keepClearZoneCount; public ObservationDto[] observationPoints; }

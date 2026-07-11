@@ -42,6 +42,11 @@ const tools = [
     feedback: { type: "string" }
   }, ["mood", "style", "story", "composition", "feedback"]),
   tool("discard_preview", "Discard the active non-persistent preview.", {}),
+  tool("begin_spatial_calibration", "Open a non-persistent Unity PreviewSceneStage for a reviewed descriptor. This does not approve, apply, or write a contract.", {
+    descriptorAssetPath: { type: "string", description: "Unity asset path to a DecorAssetDescriptor." },
+    template: { type: "string", enum: ["WallMounted", "WallBackedFloorSupported", "FloorSupported", "SupportedBy"] },
+    targetPrefabPath: { type: "string", description: "Required only for SupportedBy." }
+  }, ["descriptorAssetPath", "template"]),
   tool("inspect_spatial_calibration", "Inspect the active temporary Spatial Calibration session. This is read-only and cannot approve or apply a contract.", {}),
   tool("capture_spatial_calibration", "Run deterministic validation, create the four human-review captures, and write temporary drafts under Library. This cannot approve or apply a contract.", {}),
   tool("get_spatial_contract_draft", "Read temporary Spatial Contract drafts for analysis. Drafts are not approved contracts.", {}),

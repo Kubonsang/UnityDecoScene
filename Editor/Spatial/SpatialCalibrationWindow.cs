@@ -37,7 +37,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             scroll = EditorGUILayout.BeginScrollView(scroll);
             EditorGUILayout.LabelField("Agent Spatial Contract Studio", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Arrange a canonical example with normal Unity transforms. Geometry comes from reviewed compound OBBs; the example defines contact and interaction intent. Calibration uses an unsaved additive scene and never changes the source prefab or active scene.", MessageType.Info);
+            EditorGUILayout.HelpBox("Arrange a canonical example with normal Unity transforms. Geometry comes from reviewed compound OBBs; the example defines contact and interaction intent. Calibration uses a temporary PreviewSceneStage and never changes the source prefab or active scene.", MessageType.Info);
             descriptor = (DecorAssetDescriptor)EditorGUILayout.ObjectField("Subject Descriptor", descriptor, typeof(DecorAssetDescriptor), false);
             template = (SpatialCalibrationTemplate)EditorGUILayout.EnumPopup("Relationship", template);
             using (new EditorGUI.DisabledScope(template != SpatialCalibrationTemplate.SupportedBy))
