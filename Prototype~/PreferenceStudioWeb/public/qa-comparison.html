@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Preference Studio QA Comparison</title>
+    <title>Preference Studio Korean QA Comparison</title>
     <style>
       * { box-sizing: border-box; }
       body { margin: 0; padding: 18px; background: #111214; color: #dfe3e7; font-family: Inter, "Segoe UI", sans-serif; }
@@ -12,7 +12,7 @@
       small { color: #8f949b; }
       main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
       figure { margin: 0; border: 1px solid #3a3d41; background: #202225; }
-      figcaption { height: 36px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid #3a3d41; font-size: 12px; }
+      figcaption { min-height: 36px; display: flex; align-items: center; padding: 8px 12px; border-bottom: 1px solid #3a3d41; font-size: 12px; }
       img { display: block; width: 100%; aspect-ratio: 1.5; object-fit: contain; background: #161719; }
       .notes { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
       .note { border: 1px solid #313439; padding: 12px; color: #adb2b8; font-size: 12px; line-height: 1.5; }
@@ -21,7 +21,7 @@
   </head>
   <body>
     <header>
-      <h1>Preference Studio — visual QA</h1>
+      <h1>Preference Studio — Korean localization visual QA</h1>
       <small>1440 × 1024 implementation viewport</small>
     </header>
     <main>
@@ -30,13 +30,13 @@
         <img src="/qa/selected-review-studio.png" alt="Selected product design direction" />
       </figure>
       <figure>
-        <figcaption>Implementation · Option 2 + Option 1 sliders</figcaption>
-        <img src="/qa/implementation-final.png" alt="Implemented interactive prototype" />
+        <figcaption>Implementation · Korean default with English fallback</figcaption>
+        <img src="/qa/implementation-korean.png" alt="Korean localized interactive prototype" />
       </figure>
       <section class="notes">
-        <div class="note"><strong>Intentional extension</strong>The art-direction slider band adds the selected Option 1 control model above Option 2’s review flow.</div>
-        <div class="note"><strong>Preserved hierarchy</strong>Category navigation, A/B scene comparison, assessment controls, and AI proposal stay in the same left-to-right order.</div>
-        <div class="note"><strong>Evidence</strong>Real room captures replace mock placeholders and show the exact failure/revision contrast this workflow is meant to support.</div>
+        <div class="note"><strong>Localized by default</strong>The complete workflow opens in Korean while the top toolbar keeps an English language option.</div>
+        <div class="note"><strong>Preserved hierarchy</strong>Category navigation, A/B comparison, assessment controls, and AI proposal retain the selected review-first structure.</div>
+        <div class="note"><strong>Layout safety</strong>Korean typography uses keep-all wrapping and targeted no-wrap controls; the 1440 px view has no horizontal overflow.</div>
       </section>
     </main>
   </body>

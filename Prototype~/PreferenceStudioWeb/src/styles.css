@@ -1,5 +1,5 @@
 :root {
-  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  font-family: Inter, "Segoe UI", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
   color: #d5d7da;
   background: #151617;
   font-synthesis: none;
@@ -35,7 +35,7 @@ button { color: inherit; }
 .preview-label { margin-left: auto; color: #70747a; font-size: 10px; letter-spacing: .08em; }
 
 .workspace-toolbar { display: flex; align-items: center; gap: 16px; padding: 0 16px; background: #232528; border-bottom: 1px solid #383b3f; font-size: 12px; }
-.workspace-toolbar label { display: flex; align-items: center; gap: 9px; color: #9ca0a6; }
+.workspace-toolbar label { display: flex; align-items: center; gap: 9px; color: #9ca0a6; white-space: nowrap; }
 select { border: 1px solid #45484d; background: #303236; color: #d7d9dc; border-radius: 3px; padding: 5px 26px 5px 9px; }
 .toolbar-divider { width: 1px; height: 20px; background: #42454a; }
 .safety { margin-left: auto; display: flex; align-items: center; gap: 6px; color: #9ca0a6; }
@@ -71,6 +71,8 @@ input[type="range"] { width: 100%; height: 20px; margin: 7px 0 3px; accent-color
 .category.selected svg { color: #8bb8ff; }
 .category span { font-size: 12px; }
 .category em { font-size: 9px; font-style: normal; padding: 4px 6px; border-radius: 3px; color: #8fdda9; background: #21352a; }
+.unity-shell:lang(ko) { font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", Inter, "Segoe UI", system-ui, sans-serif; word-break: keep-all; }
+.unity-shell:lang(ko) .category em { white-space: nowrap; }
 .category .score-1, .category .score-2 { color: #f49a93; background: #3b2525; }
 .category .score-3 { color: #e7bf80; background: #3a3022; }
 .nav-help { margin: auto 12px 14px; padding: 11px; display: flex; gap: 8px; color: #8f9399; font-size: 10px; line-height: 1.45; border-top: 1px solid var(--line-soft); }

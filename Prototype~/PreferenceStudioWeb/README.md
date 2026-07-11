@@ -4,6 +4,12 @@ This interactive prototype demonstrates how a non-technical user can guide a roo
 
 It intentionally simulates the workflow rather than implementing the production placement or learning engine.
 
+## Localization
+
+- Korean is the default interface language.
+- English remains available from the **언어 / Language** selector in the top toolbar.
+- Feedback and slider state use locale-neutral IDs, so changing language does not change the underlying preference data.
+
 ## Included flow
 
 - Seven reusable art-direction sliders with importance levels
