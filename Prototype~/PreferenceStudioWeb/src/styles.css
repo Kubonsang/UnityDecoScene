@@ -186,6 +186,7 @@ input[type="range"] { width: 100%; height: 20px; margin: 7px 0 3px; accent-color
 .capture-image.view-side img { object-position: 22% center; transform: scale(1.22); }
 .capture-image.view-top img { object-position: center 25%; transform: scale(1.38) rotate(-1deg); }
 .capture-image.view-contact img { object-position: 69% 55%; transform: scale(1.72); }
+.capture-image.live-capture img, .capture-image.live-capture.view-side img, .capture-image.live-capture.view-top img, .capture-image.live-capture.view-contact img { object-fit: contain; object-position: center; transform: none; filter: none; background: #0f1113; }
 .evidence-overlay { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, transparent 49.8%, rgba(91, 173, 255, .25) 50%, transparent 50.2%), linear-gradient(0deg, transparent 49.8%, rgba(91, 173, 255, .18) 50%, transparent 50.2%); }
 .obb-box { position: absolute; left: 35%; top: 22%; width: 30%; height: 56%; border: 2px solid #58d889; box-shadow: 0 0 0 1px rgba(0,0,0,.8), inset 0 0 20px rgba(88,216,137,.06); transform: perspective(600px) rotateY(-3deg); }
 .contact-axis { position: absolute; left: 50%; top: 74%; display: block; transform-origin: left center; }

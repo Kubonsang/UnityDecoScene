@@ -19,6 +19,7 @@ const port = Number(process.env.SPATIAL_REVIEW_PORT || 4174);
 
 const server = http.createServer(async (request, response) => {
   const origin = request.headers.origin || "";
+  const requestUrl = new URL(request.url || "/", `http://127.0.0.1:${port}`);
   if (origin && !allowedOrigins.has(origin)) return send(response, 403, { error: "Origin is not allowed." });
   if (origin) {
     response.setHeader("Access-Control-Allow-Origin", origin);
@@ -29,17 +30,33 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "OPTIONS") return send(response, 204, null);
 
   try {
-    if (request.method === "GET" && request.url === "/api/health") {
+    if (request.method === "GET" && requestUrl.pathname === "/api/health") {
       return send(response, 200, { connected: fs.existsSync(sessionPath), nonce: reviewNonce, projectRoot });
     }
-    if (request.method === "GET" && request.url === "/api/spatial/session") {
-      return send(response, 200, await callUnity("inspect_spatial_calibration", {}));
+    if (request.method === "GET" && requestUrl.pathname === "/api/spatial/session") {
+      const inspection = resultOf(await callUnity("inspect_spatial_calibration", {}));
+      const validation = resultOf(await callUnity("get_deterministic_validation_report", {}));
+      return send(response, 200, { session: inspection, validation });
     }
-    if (request.method === "POST" && request.url === "/api/spatial/capture") {
+    if (request.method === "GET" && requestUrl.pathname.startsWith("/api/spatial/image/")) {
+      const view = requestUrl.pathname.slice("/api/spatial/image/".length);
+      if (!["front", "side", "top", "contact"].includes(view)) throw new Error("Unsupported capture view.");
+      const inspection = resultOf(await callUnity("inspect_spatial_calibration", {}));
+      if (!/^[0-9a-f]{32}$/.test(inspection.sessionId || "")) throw new Error("Active calibration session is invalid.");
+      const suffix = requestUrl.searchParams.get("evidence") === "1" ? "-evidence" : "";
+      const filePath = path.join(projectRoot, "Library", "DungeonDecorator", "SpatialCaptures", inspection.sessionId, `${view}${suffix}.png`);
+      const captureRoot = path.join(projectRoot, "Library", "DungeonDecorator", "SpatialCaptures");
+      if (!inside(captureRoot, filePath) || !fs.existsSync(filePath)) throw new Error("Capture image is not available.");
+      response.statusCode = 200;
+      response.setHeader("Content-Type", "image/png");
+      response.setHeader("Cache-Control", "no-store");
+      return response.end(fs.readFileSync(filePath));
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/spatial/capture") {
       requireNonce(request);
       return send(response, 200, await callUnity("capture_spatial_calibration", {}));
     }
-    if (request.method === "POST" && request.url === "/api/spatial/review") {
+    if (request.method === "POST" && requestUrl.pathname === "/api/spatial/review") {
       requireNonce(request);
       const body = await readJson(request);
       return send(response, 200, await reviewDraft(body));
@@ -132,6 +149,10 @@ function callUnity(tool, args) {
 
 function requireNonce(request) {
   if (request.headers["x-spatial-review-nonce"] !== reviewNonce) throw new Error("Invalid review nonce.");
+}
+
+function resultOf(response) {
+  return JSON.parse(response.resultJson || "{}");
 }
 
 function inside(root, candidate) {

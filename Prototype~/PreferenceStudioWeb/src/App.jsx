@@ -26,7 +26,7 @@ const spatialTranslations = {
     technical: "기술 게이트", human: "사용자 게이트", passed: "오류 0개", failed: "기술 오류", pending: "승인 대기", approved: "승인됨", revision: "수정 필요", unable: "판단 불가",
     measurements: "정확한 측정값", gap: "간격", penetration: "관통", support: "지지율", direction: "방향 일치", allowed: "허용", relation: "관계", frames: "접촉 프레임", contract: "계약 상태", captureHash: "캡처 해시",
     issuePrompt: "문제 영역", issues: ["OBB가 모델과 다름", "접촉면이 부자연스러움", "간격이 어색해 보임", "카메라로 판단하기 어려움"], comment: "의견을 남겨 주세요", approve: "승인", request: "수정 필요", cannotJudge: "판단 불가", approvalBlocked: "기술 오류가 있어 승인을 사용할 수 없습니다.",
-    aiTitle: "AI 임시 제안", aiBody: "AI는 back 프레임과 허용 간격을 제안할 수 있지만, 통과·승인·저장은 할 수 없습니다.", recapture: "재촬영 요청", latest: "최신 캡처", reviewer: "로컬 검수자: student-01", saved: "판정이 검수 기록에 반영되었습니다.", prototypeSaved: "프로토타입 판정만 변경되었습니다 · 로컬 브리지 연결 안 됨", bridgeOn: "로컬 승인 브리지 연결됨", bridgeOff: "프로토타입 모드",
+    aiTitle: "AI 임시 제안", aiBody: "AI는 back 프레임과 허용 간격을 제안할 수 있지만, 통과·승인·저장은 할 수 없습니다.", recapture: "재촬영 요청", latest: "최신 캡처", reviewer: "로컬 검수자: student-01", saved: "판정이 검수 기록에 반영되었습니다.", prototypeSaved: "프로토타입 판정만 변경되었습니다 · 로컬 브리지 연결 안 됨", bridgeOn: "로컬 승인 브리지 연결됨", bridgeOff: "프로토타입 모드", liveCapture: "실제 Unity 캡처",
   },
   en: {
     studio: "Asset Geometry", calibration: "Spatial Calibration", queue: "Assets awaiting review", queueHelp: "Examples captured in Unity. Technical pass alone never activates a contract; human approval is required.",
@@ -34,7 +34,7 @@ const spatialTranslations = {
     technical: "Technical gate", human: "Human gate", passed: "0 errors", failed: "Technical errors", pending: "Awaiting approval", approved: "Approved", revision: "Revision requested", unable: "Unable to judge",
     measurements: "Exact measurements", gap: "Gap", penetration: "Penetration", support: "Support", direction: "Direction", allowed: "Allowed", relation: "Relation", frames: "Contact frames", contract: "Contract state", captureHash: "Capture hash",
     issuePrompt: "Problem area", issues: ["OBB does not match model", "Contact frame looks wrong", "Gap looks unnatural", "Camera is insufficient"], comment: "Add review notes", approve: "Approve", request: "Request revision", cannotJudge: "Unable to judge", approvalBlocked: "Approval is disabled while technical errors exist.",
-    aiTitle: "Temporary AI proposal", aiBody: "AI may suggest the back frame and tolerances, but cannot pass, approve, or save a contract.", recapture: "Request recapture", latest: "Latest capture", reviewer: "Local reviewer: student-01", saved: "Decision recorded in the review record.", prototypeSaved: "Prototype state only · local review bridge disconnected", bridgeOn: "Local approval bridge connected", bridgeOff: "Prototype mode",
+    aiTitle: "Temporary AI proposal", aiBody: "AI may suggest the back frame and tolerances, but cannot pass, approve, or save a contract.", recapture: "Request recapture", latest: "Latest capture", reviewer: "Local reviewer: student-01", saved: "Decision recorded in the review record.", prototypeSaved: "Prototype state only · local review bridge disconnected", bridgeOn: "Local approval bridge connected", bridgeOff: "Prototype mode", liveCapture: "Live Unity capture",
   },
 };
 
@@ -299,14 +299,36 @@ function GeometryStudio({ locale }) {
   const [decisions, setDecisions] = useState({});
   const [notice, setNotice] = useState(copy.latest);
   const [bridge, setBridge] = useState({ connected: false, nonce: "" });
-  const selected = calibrationCases.find((item) => item.id === selectedId) ?? calibrationCases[0];
+  const [liveSession, setLiveSession] = useState(null);
+  const [liveValidation, setLiveValidation] = useState(null);
+  const baseSelected = calibrationCases.find((item) => item.id === selectedId) ?? calibrationCases[0];
+  const liveContact = liveValidation?.contacts?.[0];
+  const selected = baseSelected.id === "banner" && liveSession ? {
+    ...baseSelected,
+    name: liveSession.subjectName || baseSelected.name,
+    relation: liveSession.template || baseSelected.relation,
+    errors: liveValidation?.error_count ?? baseSelected.errors,
+    gap: liveContact ? `${liveContact.gap.toFixed(4)} m` : baseSelected.gap,
+    penetration: liveContact ? `${liveContact.penetration.toFixed(4)} m` : baseSelected.penetration,
+    support: liveContact ? `${Math.round(liveContact.support * 100)}%` : baseSelected.support,
+    direction: liveContact ? liveContact.direction_alignment.toFixed(3) : baseSelected.direction,
+    hash: liveSession.captureSetHash ? `${liveSession.captureSetHash.slice(0, 4)}…${liveSession.captureSetHash.slice(-4)}` : baseSelected.hash,
+  } : baseSelected;
+  const liveCapture = selected.id === "banner" && Boolean(liveSession?.captureSetHash);
   const decision = decisions[selected.id] ?? selected.state;
 
   useEffect(() => {
     let active = true;
     fetch("http://127.0.0.1:4174/api/health")
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("bridge unavailable")))
-      .then((result) => { if (active) setBridge({ connected: Boolean(result.connected), nonce: result.nonce || "" }); })
+      .then(async (result) => {
+        if (active) setBridge({ connected: Boolean(result.connected), nonce: result.nonce || "" });
+        if (!result.connected) return;
+        const response = await fetch("http://127.0.0.1:4174/api/spatial/session");
+        if (!response.ok) throw new Error("calibration unavailable");
+        const data = await response.json();
+        if (active) { setLiveSession(data.session); setLiveValidation(data.validation); }
+      })
       .catch(() => { if (active) setBridge({ connected: false, nonce: "" }); });
     return () => { active = false; };
   }, []);
@@ -327,7 +349,7 @@ function GeometryStudio({ locale }) {
   const decide = async (next) => {
     if (next === "approved" && selected.errors > 0) return;
     setDecisions((current) => ({ ...current, [selected.id]: next }));
-    if (!bridge.connected) {
+    if (!bridge.connected || !liveCapture) {
       setNotice(copy.prototypeSaved);
       return;
     }
@@ -381,12 +403,12 @@ function GeometryStudio({ locale }) {
             <button className={!showOverlay ? "active" : ""} onClick={() => setShowOverlay(false)}>{copy.raw}</button>
             <button className={showOverlay ? "active" : ""} onClick={() => setShowOverlay(true)}>{copy.overlay}</button>
           </div>
-          <span>{copy.captureHash}: <code>{selected.hash}</code></span>
+          <span>{liveCapture ? `${copy.liveCapture} · ` : ""}{copy.captureHash}: <code>{selected.hash}</code></span>
         </div>
         <div className="capture-stage">
-          <div className={`capture-image view-${view}`}>
-            <img src="/assets/spatial-calibration-dungeon.png" alt={`${selected.name} ${copy.views[view]}`} />
-            {showOverlay && <div className="evidence-overlay" aria-label={copy.overlay}>
+          <div className={`capture-image view-${view} ${liveCapture ? "live-capture" : ""}`}>
+            <img src={liveCapture ? `http://127.0.0.1:4174/api/spatial/image/${view}?evidence=${showOverlay ? 1 : 0}&hash=${liveSession.captureSetHash}` : "/assets/spatial-calibration-dungeon.png"} alt={`${selected.name} ${copy.views[view]}`} />
+            {showOverlay && !liveCapture && <div className="evidence-overlay" aria-label={copy.overlay}>
               <span className="obb-box" /><span className="contact-axis axis-x" /><span className="contact-axis axis-y" />
               <em>{selected.frames}</em>
             </div>}
