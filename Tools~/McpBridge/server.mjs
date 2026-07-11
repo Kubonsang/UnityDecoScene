@@ -41,7 +41,14 @@ const tools = [
     composition: { type: "integer", minimum: 0, maximum: 100 },
     feedback: { type: "string" }
   }, ["mood", "style", "story", "composition", "feedback"]),
-  tool("discard_preview", "Discard the active non-persistent preview.", {})
+  tool("discard_preview", "Discard the active non-persistent preview.", {}),
+  tool("inspect_spatial_calibration", "Inspect the active temporary Spatial Calibration session. This is read-only and cannot approve or apply a contract.", {}),
+  tool("capture_spatial_calibration", "Run deterministic validation, create the four human-review captures, and write temporary drafts under Library. This cannot approve or apply a contract.", {}),
+  tool("get_spatial_contract_draft", "Read temporary Spatial Contract drafts for analysis. Drafts are not approved contracts.", {}),
+  tool("submit_spatial_contract_proposal", "Submit a temporary AI suggestion for relation, frames, or tolerances. A proposal cannot pass, approve, apply, or save a tracked contract.", {
+    proposalJson: { type: "string", description: "A JSON proposal describing suggested relation, frames, tolerances, and rationale." }
+  }, ["proposalJson"]),
+  tool("get_deterministic_validation_report", "Run and return the deterministic collision, penetration, gap, support, and direction report. The report is not a human approval.", {})
 ];
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
@@ -62,7 +69,7 @@ async function handle(request) {
       protocolVersion: params.protocolVersion || "2024-11-05",
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "unity-concept-room", version: "0.2.0" },
-      instructions: `Inspect the room and concept, view the catalog, choose only matching reviewed assets, then create a preview. Validate and capture it before refining. Never claim the preview was applied; Apply is available only to the human in Unity. Optional unity-ctx integration: ${genericTools.length ? "connected" : "disconnected"}.`
+      instructions: `Inspect the room and concept, view the catalog, choose only matching reviewed assets, then create a preview. For Spatial Contracts, AI may inspect, capture, validate, and submit temporary proposals only. AI cannot pass, approve, apply, or write tracked contracts; final activation requires a human decision in the local review UI. Never claim the preview was applied. Optional unity-ctx integration: ${genericTools.length ? "connected" : "disconnected"}.`
     });
   }
   if (method === "ping") return writeResult(id, {});

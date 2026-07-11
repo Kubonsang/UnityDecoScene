@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowClockwise,
   Brain,
@@ -18,6 +18,31 @@ import {
   SquaresFour,
   WarningCircle,
 } from "@phosphor-icons/react";
+
+const spatialTranslations = {
+  ko: {
+    studio: "에셋 공간 규칙", calibration: "공간 캘리브레이션", queue: "검수 대기 에셋", queueHelp: "Unity에서 캡처한 사례입니다. 기술 검사를 통과해도 사용자 승인이 있어야 활성화됩니다.",
+    evidence: "캡처 증거", raw: "원본", overlay: "접촉 정보", views: { front: "정면", side: "측면", top: "상단", contact: "접촉 확대" },
+    technical: "기술 게이트", human: "사용자 게이트", passed: "오류 0개", failed: "기술 오류", pending: "승인 대기", approved: "승인됨", revision: "수정 필요", unable: "판단 불가",
+    measurements: "정확한 측정값", gap: "간격", penetration: "관통", support: "지지율", direction: "방향 일치", allowed: "허용", relation: "관계", frames: "접촉 프레임", contract: "계약 상태", captureHash: "캡처 해시",
+    issuePrompt: "문제 영역", issues: ["OBB가 모델과 다름", "접촉면이 부자연스러움", "간격이 어색해 보임", "카메라로 판단하기 어려움"], comment: "의견을 남겨 주세요", approve: "승인", request: "수정 필요", cannotJudge: "판단 불가", approvalBlocked: "기술 오류가 있어 승인을 사용할 수 없습니다.",
+    aiTitle: "AI 임시 제안", aiBody: "AI는 back 프레임과 허용 간격을 제안할 수 있지만, 통과·승인·저장은 할 수 없습니다.", recapture: "재촬영 요청", latest: "최신 캡처", reviewer: "로컬 검수자: student-01", saved: "판정이 검수 기록에 반영되었습니다.", prototypeSaved: "프로토타입 판정만 변경되었습니다 · 로컬 브리지 연결 안 됨", bridgeOn: "로컬 승인 브리지 연결됨", bridgeOff: "프로토타입 모드",
+  },
+  en: {
+    studio: "Asset Geometry", calibration: "Spatial Calibration", queue: "Assets awaiting review", queueHelp: "Examples captured in Unity. Technical pass alone never activates a contract; human approval is required.",
+    evidence: "Capture evidence", raw: "Raw", overlay: "Contact evidence", views: { front: "Front", side: "Side", top: "Top", contact: "Contact close-up" },
+    technical: "Technical gate", human: "Human gate", passed: "0 errors", failed: "Technical errors", pending: "Awaiting approval", approved: "Approved", revision: "Revision requested", unable: "Unable to judge",
+    measurements: "Exact measurements", gap: "Gap", penetration: "Penetration", support: "Support", direction: "Direction", allowed: "Allowed", relation: "Relation", frames: "Contact frames", contract: "Contract state", captureHash: "Capture hash",
+    issuePrompt: "Problem area", issues: ["OBB does not match model", "Contact frame looks wrong", "Gap looks unnatural", "Camera is insufficient"], comment: "Add review notes", approve: "Approve", request: "Request revision", cannotJudge: "Unable to judge", approvalBlocked: "Approval is disabled while technical errors exist.",
+    aiTitle: "Temporary AI proposal", aiBody: "AI may suggest the back frame and tolerances, but cannot pass, approve, or save a contract.", recapture: "Request recapture", latest: "Latest capture", reviewer: "Local reviewer: student-01", saved: "Decision recorded in the review record.", prototypeSaved: "Prototype state only · local review bridge disconnected", bridgeOn: "Local approval bridge connected", bridgeOff: "Prototype mode",
+  },
+};
+
+const calibrationCases = [
+  { id: "banner", name: "Banner_Red", relation: "WallMounted", frames: "back → wall", errors: 0, gap: "0.008 m", penetration: "0.000 m", support: "100%", direction: "0.998", state: "pending", hash: "8f2c…91a7" },
+  { id: "bookshelf", name: "Bookshelf_Wide", relation: "FloorSupported + WallBacked", frames: "bottom → floor · back → wall", errors: 0, gap: "0.031 m", penetration: "0.000 m", support: "94%", direction: "0.992", state: "pending", hash: "41bd…d02e" },
+  { id: "bottle", name: "PotionBottle_A", relation: "SupportedBy", frames: "bottom → table.top", errors: 1, gap: "0.018 m", penetration: "0.000 m", support: "42%", direction: "0.981", state: "failed", hash: "c931…ee42" },
+];
 
 const directionDefaults = [
   { id: "order", value: 25, importance: "high" },
@@ -227,12 +252,17 @@ function DirectionSlider({ item, copy, onChange, onImportance }) {
   );
 }
 
-function AppHeader({ copy, locale, setLocale, scope, setScope, theme, setTheme }) {
+function AppHeader({ copy, locale, setLocale, scope, setScope, theme, setTheme, workspace, setWorkspace }) {
+  const spatial = spatialTranslations[locale];
   return (
     <>
       <header className="app-titlebar">
         <div className="brand"><Cube size={19} weight="fill" /><span>{copy.brand}</span></div>
-        <div className="title-tabs"><span>{copy.prototype}</span><span className="active">{copy.studio}</span></div>
+        <div className="title-tabs">
+          <span>{copy.prototype}</span>
+          <button className={workspace === "review" ? "active" : ""} onClick={() => setWorkspace("review")}>{copy.studio}</button>
+          <button className={workspace === "spatial" ? "active" : ""} onClick={() => setWorkspace("spatial")}>{spatial.studio}</button>
+        </div>
         <span className="preview-label">{copy.interactive}</span>
       </header>
       <div className="workspace-toolbar">
@@ -259,8 +289,149 @@ function AppHeader({ copy, locale, setLocale, scope, setScope, theme, setTheme }
   );
 }
 
+function GeometryStudio({ locale }) {
+  const copy = spatialTranslations[locale];
+  const [selectedId, setSelectedId] = useState("banner");
+  const [view, setView] = useState("front");
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [selectedIssues, setSelectedIssues] = useState(new Set());
+  const [comment, setComment] = useState("");
+  const [decisions, setDecisions] = useState({});
+  const [notice, setNotice] = useState(copy.latest);
+  const [bridge, setBridge] = useState({ connected: false, nonce: "" });
+  const selected = calibrationCases.find((item) => item.id === selectedId) ?? calibrationCases[0];
+  const decision = decisions[selected.id] ?? selected.state;
+
+  useEffect(() => {
+    let active = true;
+    fetch("http://127.0.0.1:4174/api/health")
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("bridge unavailable")))
+      .then((result) => { if (active) setBridge({ connected: Boolean(result.connected), nonce: result.nonce || "" }); })
+      .catch(() => { if (active) setBridge({ connected: false, nonce: "" }); });
+    return () => { active = false; };
+  }, []);
+
+  const chooseCase = (id) => {
+    setSelectedId(id);
+    setSelectedIssues(new Set());
+    setComment("");
+    setNotice(copy.latest);
+  };
+
+  const toggleIssue = (issue) => setSelectedIssues((current) => {
+    const next = new Set(current);
+    next.has(issue) ? next.delete(issue) : next.add(issue);
+    return next;
+  });
+
+  const decide = async (next) => {
+    if (next === "approved" && selected.errors > 0) return;
+    setDecisions((current) => ({ ...current, [selected.id]: next }));
+    if (!bridge.connected) {
+      setNotice(copy.prototypeSaved);
+      return;
+    }
+    const decisionsByName = { approved: "Approved", revision: "RevisionRequested", unable: "UnableToJudge" };
+    try {
+      const response = await fetch("http://127.0.0.1:4174/api/spatial/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Spatial-Review-Nonce": bridge.nonce },
+        body: JSON.stringify({ decision: decisionsByName[next], reviewer: "student-01", issues: [...selectedIssues], comment }),
+      });
+      if (!response.ok) throw new Error("review bridge rejected the decision");
+      setNotice(copy.saved);
+    } catch {
+      setBridge({ connected: false, nonce: "" });
+      setNotice(copy.prototypeSaved);
+    }
+  };
+
+  const statusLabel = (item) => {
+    const state = decisions[item.id] ?? item.state;
+    if (state === "approved") return copy.approved;
+    if (state === "revision") return copy.revision;
+    if (state === "unable") return copy.unable;
+    return item.errors ? `${copy.failed} ${item.errors}` : copy.pending;
+  };
+
+  return (
+    <section className="spatial-studio">
+      <aside className="calibration-queue">
+        <div className="panel-title"><ListChecks size={18} />{copy.queue}</div>
+        <div className="calibration-case-list">
+          {calibrationCases.map((item) => (
+            <button key={item.id} className={`calibration-case ${selected.id === item.id ? "selected" : ""}`} onClick={() => chooseCase(item.id)}>
+              <span className="asset-thumb"><Cube size={24} weight="duotone" /></span>
+              <span><strong>{item.name}</strong><small>{item.relation}</small></span>
+              <em className={item.errors ? "error" : (decisions[item.id] === "approved" ? "approved" : "")}>{statusLabel(item)}</em>
+            </button>
+          ))}
+        </div>
+        <div className="queue-help"><ShieldCheck size={18} /><span>{copy.queueHelp}</span></div>
+      </aside>
+
+      <section className="evidence-workspace">
+        <header className="evidence-header">
+          <div><span>{copy.calibration}</span><strong>{selected.name}</strong></div>
+          <span className={`gate-pill ${selected.errors ? "error" : "passed"}`}><ShieldCheck size={14} weight="fill" />{copy.technical}: {selected.errors ? `${copy.failed} ${selected.errors}` : copy.passed}</span>
+        </header>
+        <div className="evidence-toolbar">
+          <strong>{copy.evidence}</strong>
+          <div className="segmented">
+            <button className={!showOverlay ? "active" : ""} onClick={() => setShowOverlay(false)}>{copy.raw}</button>
+            <button className={showOverlay ? "active" : ""} onClick={() => setShowOverlay(true)}>{copy.overlay}</button>
+          </div>
+          <span>{copy.captureHash}: <code>{selected.hash}</code></span>
+        </div>
+        <div className="capture-stage">
+          <div className={`capture-image view-${view}`}>
+            <img src="/assets/spatial-calibration-dungeon.png" alt={`${selected.name} ${copy.views[view]}`} />
+            {showOverlay && <div className="evidence-overlay" aria-label={copy.overlay}>
+              <span className="obb-box" /><span className="contact-axis axis-x" /><span className="contact-axis axis-y" />
+              <em>{selected.frames}</em>
+            </div>}
+          </div>
+          <nav className="capture-tabs">
+            {Object.entries(copy.views).map(([id, label]) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><ImageSquare size={15} />{label}</button>)}
+          </nav>
+        </div>
+        <div className="measurement-strip">
+          <div><span>{copy.gap}</span><strong className={selected.id === "bottle" ? "bad" : ""}>{selected.gap}</strong><small>{copy.allowed}: {selected.relation === "WallMounted" ? "0.005–0.010 m" : selected.id === "bookshelf" ? "0.010–0.050 m" : "0–0.010 m"}</small></div>
+          <div><span>{copy.penetration}</span><strong>{selected.penetration}</strong><small>{copy.allowed}: 0 m</small></div>
+          <div><span>{copy.support}</span><strong className={selected.id === "bottle" ? "bad" : ""}>{selected.support}</strong><small>{copy.allowed}: ≥ 60%</small></div>
+          <div><span>{copy.direction}</span><strong>{selected.direction}</strong><small>{copy.allowed}: ≥ 0.95</small></div>
+        </div>
+      </section>
+
+      <aside className="human-review-panel">
+        <div className="panel-title"><CheckCircle size={18} weight="fill" />{copy.human}</div>
+        <div className="contract-summary">
+          <div><span>{copy.contract}</span><strong>{statusLabel(selected)}</strong></div>
+          <dl><div><dt>{copy.relation}</dt><dd>{selected.relation}</dd></div><div><dt>{copy.frames}</dt><dd>{selected.frames}</dd></div></dl>
+        </div>
+        <div className="ai-boundary"><Brain size={18} weight="fill" /><div><strong>{copy.aiTitle}</strong><p>{copy.aiBody}</p></div></div>
+        <div className="review-form">
+          <strong>{copy.issuePrompt}</strong>
+          <div className="spatial-issues">{copy.issues.map((issue) => <button key={issue} className={selectedIssues.has(issue) ? "selected" : ""} onClick={() => toggleIssue(issue)}>{selectedIssues.has(issue) ? <WarningCircle size={14} weight="fill" /> : <CheckCircle size={14} />}{issue}</button>)}</div>
+          <textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder={copy.comment} />
+        </div>
+        {selected.errors > 0 && <div className="approval-blocked"><WarningCircle size={16} weight="fill" />{copy.approvalBlocked}</div>}
+        <div className="decision-actions">
+          <button className="approve-action" disabled={selected.errors > 0} onClick={() => decide("approved")}><Check size={16} weight="bold" />{copy.approve}</button>
+          <button onClick={() => decide("revision")}><WarningCircle size={16} />{copy.request}</button>
+          <button onClick={() => decide("unable")}><ImageSquare size={16} />{copy.cannotJudge}</button>
+        </div>
+        {decision === "unable" && <button className="recapture-action" onClick={() => setNotice(copy.latest)}><ArrowClockwise size={15} />{copy.recapture}</button>}
+        <div className="reviewer-note"><LockKey size={14} />{copy.reviewer}<em className={bridge.connected ? "connected" : ""}>{bridge.connected ? copy.bridgeOn : copy.bridgeOff}</em></div>
+      </aside>
+      <div className="spatial-status"><CheckCircle size={14} weight="fill" />{notice}</div>
+    </section>
+  );
+}
+
 function App() {
   const [locale, setLocale] = useState("ko");
+  const [workspace, setWorkspace] = useState("spatial");
   const copy = translations[locale];
   const [directions, setDirections] = useState(directionDefaults);
   const [activeId, setActiveId] = useState("floor");
@@ -326,9 +497,10 @@ function App() {
   const categoryStatus = (score) => score <= 2 ? copy.statuses.needsWork : score === 3 ? copy.statuses.neutral : copy.statuses.good;
 
   return (
-    <main className="unity-shell" lang={locale}>
-      <AppHeader copy={copy} locale={locale} setLocale={setLocale} scope={scope} setScope={setScope} theme={theme} setTheme={setTheme} />
+    <main className={`unity-shell ${workspace === "spatial" ? "spatial-shell" : ""}`} lang={locale}>
+      <AppHeader copy={copy} locale={locale} setLocale={setLocale} scope={scope} setScope={setScope} theme={theme} setTheme={setTheme} workspace={workspace} setWorkspace={setWorkspace} />
 
+      {workspace === "review" ? <>
       <section className="direction-band">
         <div className="direction-heading">
           <SlidersHorizontal size={20} weight="fill" />
@@ -409,6 +581,7 @@ function App() {
       </section>
 
       <footer className="statusbar"><span className="status-ok"><CheckCircle size={15} weight="fill" />{copy.notices[noticeKey]}</span><span>{copy.seed}</span><span>{copy.previewOnly}</span></footer>
+      </> : <GeometryStudio locale={locale} />}
     </main>
   );
 }

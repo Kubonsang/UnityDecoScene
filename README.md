@@ -19,6 +19,22 @@ The package includes a dependency-free Node MCP bridge under `Tools~/McpBridge/s
 
 Unity must be open for room MCP tools to operate. If `unity-ctx` is installed or `UNITY_CTX_BIN` points to its executable, the bridge also exposes its read-only context, Spatial Manifest v2 check, and wall-suggestion tools. The room workflow remains available when that optional child process is disconnected. MCP can create and refine preview state, but it cannot apply changes to the scene.
 
+Spatial Calibration adds proposal-only tools for inspection, four-view capture, draft reading, deterministic validation, and temporary AI proposals. MCP has no pass, approval, tracked-file write, or Apply tool.
+
+## Human-reviewed Spatial Contracts
+
+Open **Window > Concept Room Decorator > Spatial Calibration** to create a reusable geometry or interaction contract without modifying the active scene or source prefab.
+
+1. Select a subject descriptor, optional target prefab, and a relationship template.
+2. Review or edit the generated compound OBBs and bottom/back/top contact frames in the temporary calibration scene.
+3. Place the subject in the intended reference pose and run deterministic validation.
+4. Capture front, side, top, and contact-close-up views with raw/evidence variants.
+5. Review the capture set in the Korean Preference Studio. Technical errors disable approval; a human can approve, request revision, or mark the capture unable to judge.
+
+Contracts move through `Draft → TechnicalPassed → AwaitingHumanReview → Approved`. Geometry, dependency, contract, or capture hash changes invalidate approval. Approved asset contracts are stored under `Assets/SpatialContracts/Assets`; `SupportedBy` interaction contracts use `Assets/SpatialContracts/Interactions`.
+
+The optional loopback human-authority service lives at `Tools~/SpatialReviewBridge/server.mjs`. It is separate from MCP, accepts only the local Preference Studio origin, uses a per-process nonce, and runs `validate → review → diff → apply --write → validate` after a human click.
+
 ## Geometry contract
 
 Collider geometry is preferred. Prefabs without colliders receive one local OBB proxy per Renderer bound. A dependency hash prevents unchanged reviewed assets from being reanalysed; changed source assets return to an unreviewed state. Final collision decisions use compound OBB SAT, while AABB is only a broad-phase filter.

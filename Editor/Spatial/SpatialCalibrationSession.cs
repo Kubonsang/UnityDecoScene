@@ -1,0 +1,246 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+namespace UnityDecoScene.DungeonDecorator.Editor
+{
+    public sealed class SpatialCalibrationSession : IDisposable
+    {
+        public static SpatialCalibrationSession Current { get; private set; }
+        public static event Action Changed;
+
+        public string SessionId { get; } = Guid.NewGuid().ToString("N");
+        public DecorAssetDescriptor Descriptor { get; }
+        public GameObject TargetPrefab { get; }
+        public SpatialCalibrationTemplate Template { get; }
+        public DecorGeometryProfile Geometry { get; }
+        public GameObject SubjectObject { get; private set; }
+        public GameObject TargetObject { get; private set; }
+        public GameObject FloorFixture { get; private set; }
+        public GameObject WallFixture { get; private set; }
+        public SpatialCalibrationReport LastReport { get; set; }
+        public SpatialCaptureSet CaptureSet { get; set; }
+        public List<string> DraftPaths { get; } = new();
+        public string AgentProposalJson { get; set; }
+        public IReadOnlyList<SpatialContactRuleContract> Rules => rules;
+
+        private readonly List<SpatialContactRuleContract> rules = new();
+        private Scene calibrationScene;
+        private Scene previousActiveScene;
+        private SpatialCalibrationPreviewStage previewStage;
+
+        private SpatialCalibrationSession(DecorAssetDescriptor descriptor, GameObject targetPrefab, SpatialCalibrationTemplate template)
+        {
+            Descriptor = descriptor;
+            TargetPrefab = targetPrefab;
+            Template = template;
+            Geometry = DecorAssetScanner.BuildGeometryProfile(descriptor.Prefab);
+            Geometry.reviewed = false;
+            BuildRules();
+            OpenScene();
+        }
+
+        public static SpatialCalibrationSession Begin(DecorAssetDescriptor descriptor, GameObject targetPrefab, SpatialCalibrationTemplate template)
+        {
+            if (descriptor == null || descriptor.Prefab == null) throw new ArgumentException("A descriptor with a prefab is required.");
+            if (template == SpatialCalibrationTemplate.SupportedBy && targetPrefab == null) throw new ArgumentException("SupportedBy requires a target prefab.");
+            Current?.Dispose();
+            Current = new SpatialCalibrationSession(descriptor, targetPrefab, template);
+            Changed?.Invoke();
+            return Current;
+        }
+
+        public void NotifyChanged()
+        {
+            LastReport = null;
+            CaptureSet = null;
+            DraftPaths.Clear();
+            AgentProposalJson = null;
+            Changed?.Invoke();
+            SceneView.RepaintAll();
+        }
+
+        public ContactFrame Frame(string id)
+        {
+            if (id == "bottom") return Geometry.bottomContact;
+            if (id == "back") return Geometry.backContact;
+            var bounds = new Bounds(Descriptor.LocalBoundsCenter, Descriptor.LocalBoundsSize);
+            return new ContactFrame
+            {
+                frameId = "top",
+                localPoint = new Vector3(bounds.center.x, bounds.max.y, bounds.center.z),
+                localNormal = Vector3.up,
+                localTangent = Vector3.right,
+                size = new Vector2(bounds.size.x, bounds.size.z)
+            };
+        }
+
+        public Bounds CombinedWorldBounds()
+        {
+            var renderers = new List<Renderer>();
+            if (SubjectObject != null) renderers.AddRange(SubjectObject.GetComponentsInChildren<Renderer>(true));
+            if (TargetObject != null) renderers.AddRange(TargetObject.GetComponentsInChildren<Renderer>(true));
+            if (FloorFixture != null) renderers.AddRange(FloorFixture.GetComponentsInChildren<Renderer>(true));
+            if (WallFixture != null) renderers.AddRange(WallFixture.GetComponentsInChildren<Renderer>(true));
+            if (renderers.Count == 0) return new Bounds(Vector3.zero, Vector3.one);
+            var result = renderers[0].bounds;
+            for (var i = 1; i < renderers.Count; i++) result.Encapsulate(renderers[i].bounds);
+            return result;
+        }
+
+        public Bounds TargetWorldBounds()
+        {
+            var renderers = TargetObject != null ? TargetObject.GetComponentsInChildren<Renderer>(true) : Array.Empty<Renderer>();
+            if (renderers.Length == 0) return new Bounds(Vector3.zero, Vector3.one);
+            var result = renderers[0].bounds;
+            for (var i = 1; i < renderers.Length; i++) result.Encapsulate(renderers[i].bounds);
+            return result;
+        }
+
+        public void Dispose()
+        {
+            if (previewStage != null)
+            {
+                if (ReferenceEquals(StageUtility.GetCurrentStage(), previewStage)) StageUtility.GoBackToPreviousStage();
+                UnityEngine.Object.DestroyImmediate(previewStage);
+                previewStage = null;
+            }
+            if (previousActiveScene.IsValid() && previousActiveScene.isLoaded) SceneManager.SetActiveScene(previousActiveScene);
+            if (ReferenceEquals(Current, this)) Current = null;
+            Changed?.Invoke();
+            SceneView.RepaintAll();
+        }
+
+        private void OpenScene()
+        {
+            previousActiveScene = SceneManager.GetActiveScene();
+            previewStage = ScriptableObject.CreateInstance<SpatialCalibrationPreviewStage>();
+            previewStage.hideFlags = HideFlags.HideAndDontSave;
+            StageUtility.GoToStage(previewStage, true);
+            calibrationScene = previewStage.scene;
+
+            FloorFixture = CreateFixture("Calibration Floor", new Vector3(6f, 0.1f, 6f), new Vector3(0f, -0.05f, 0f), new Color(0.23f, 0.25f, 0.28f));
+            WallFixture = CreateFixture("Calibration Wall", new Vector3(6f, 4f, 0.1f), new Vector3(0f, 2f, -0.05f), new Color(0.28f, 0.3f, 0.34f));
+            SubjectObject = InstantiateTemporary(Descriptor.Prefab, "Calibration Subject");
+            if (TargetPrefab != null) TargetObject = InstantiateTemporary(TargetPrefab, "Calibration Target");
+            MoveToCalibrationScene(FloorFixture);
+            MoveToCalibrationScene(WallFixture);
+            MoveToCalibrationScene(SubjectObject);
+            MoveToCalibrationScene(TargetObject);
+
+            PositionCanonicalExample();
+            MoveToCalibrationScene(AddLight());
+            Selection.activeGameObject = SubjectObject;
+            SceneView.lastActiveSceneView?.FrameSelected();
+        }
+
+        private void PositionCanonicalExample()
+        {
+            var bottom = Geometry.bottomContact.localPoint;
+            var back = Geometry.backContact.localPoint;
+            var position = Vector3.zero;
+            switch (Template)
+            {
+                case SpatialCalibrationTemplate.WallMounted:
+                    position = new Vector3(-back.x, 1.4f - back.y, 0.0075f - back.z);
+                    break;
+                case SpatialCalibrationTemplate.WallBackedFloorSupported:
+                    position = new Vector3(-back.x, -bottom.y, 0.03f - back.z);
+                    break;
+                case SpatialCalibrationTemplate.FloorSupported:
+                    position = new Vector3(-bottom.x, -bottom.y, -bottom.z);
+                    break;
+                case SpatialCalibrationTemplate.SupportedBy:
+                    var targetBounds = TargetWorldBounds();
+                    position = new Vector3(targetBounds.center.x - bottom.x, targetBounds.max.y - bottom.y, targetBounds.center.z - bottom.z);
+                    break;
+            }
+            SubjectObject.transform.SetPositionAndRotation(position, Quaternion.identity);
+        }
+
+        private void BuildRules()
+        {
+            switch (Template)
+            {
+                case SpatialCalibrationTemplate.WallMounted:
+                    rules.Add(Rule("wall", "WallMounted", "back", "surface:wall", 0.005f, 0.01f));
+                    break;
+                case SpatialCalibrationTemplate.WallBackedFloorSupported:
+                    rules.Add(Rule("wall", "WallBacked", "back", "surface:wall", 0.01f, 0.05f));
+                    rules.Add(Rule("floor", "FloorSupported", "bottom", "surface:floor", 0f, 0.01f));
+                    break;
+                case SpatialCalibrationTemplate.FloorSupported:
+                    rules.Add(Rule("floor", "FloorSupported", "bottom", "surface:floor", 0f, 0.01f));
+                    break;
+                case SpatialCalibrationTemplate.SupportedBy:
+                    rules.Add(Rule("support", "SupportedBy", "bottom", "asset:target", 0f, 0.01f));
+                    break;
+            }
+        }
+
+        private static SpatialContactRuleContract Rule(string id, string kind, string frame, string target, float minimum, float maximum) => new()
+        {
+            id = id,
+            kind = kind,
+            frame_id = frame,
+            target = target,
+            minimum_gap = minimum,
+            maximum_gap = maximum,
+            maximum_penetration = 0f,
+            minimum_support = 0.6f,
+            direction_alignment = 0.95f
+        };
+
+        private static GameObject InstantiateTemporary(GameObject prefab, string label)
+        {
+            var instance = UnityEngine.Object.Instantiate(prefab);
+            instance.name = label;
+            SetFlags(instance);
+            return instance;
+        }
+
+        private static GameObject CreateFixture(string label, Vector3 scale, Vector3 position, Color color)
+        {
+            var fixture = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            fixture.name = label;
+            fixture.transform.SetPositionAndRotation(position, Quaternion.identity);
+            fixture.transform.localScale = scale;
+            var material = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard")) { color = color, hideFlags = HideFlags.HideAndDontSave };
+            fixture.GetComponent<Renderer>().sharedMaterial = material;
+            SetFlags(fixture);
+            return fixture;
+        }
+
+        private static void SetFlags(GameObject root)
+        {
+            foreach (var transform in root.GetComponentsInChildren<Transform>(true)) transform.gameObject.hideFlags = HideFlags.DontSave;
+        }
+
+        private void MoveToCalibrationScene(GameObject root)
+        {
+            if (root != null && calibrationScene.IsValid()) SceneManager.MoveGameObjectToScene(root, calibrationScene);
+        }
+
+        private static GameObject AddLight()
+        {
+            var lightObject = new GameObject("Calibration Light") { hideFlags = HideFlags.DontSave };
+            var light = lightObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.intensity = 1.2f;
+            light.color = new Color(1f, 0.92f, 0.82f);
+            lightObject.transform.rotation = Quaternion.Euler(45f, -35f, 0f);
+            return lightObject;
+        }
+    }
+
+    internal sealed class SpatialCalibrationPreviewStage : PreviewSceneStage
+    {
+        protected override GUIContent CreateHeaderContent() => new("Spatial Calibration");
+        protected override bool OnOpenStage() => base.OnOpenStage();
+        protected override void OnCloseStage() => base.OnCloseStage();
+    }
+}

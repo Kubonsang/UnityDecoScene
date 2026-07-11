@@ -34,6 +34,16 @@ The Scene View overlay renders OBB/contact evidence in red for overlap, orange f
 
 After capture, compare the room views with the references and submit mood, style, story, and composition scores. Every score must meet the threshold stored in the concept brief; a high average cannot hide a weak axis.
 
+## Calibrate Spatial Contracts
+
+Spatial Calibration runs in an additive unsaved scene and never edits the active authoring scene or source prefab. Choose `WallMounted`, `WallBacked + FloorSupported`, `FloorSupported`, or `SupportedBy`, correct compound OBB handles and contact frames, then position the subject as the intended example.
+
+One example defines the reference pose; tolerances still come from the conservative template. The deterministic report exposes gap, penetration, support, and direction alignment for every simultaneous contact. A wall-backed bookshelf therefore must pass both floor support and wall contact.
+
+`Capture Example` produces front, side, top, and contact-close-up PNGs plus raw/evidence variants under `Library/DungeonDecorator/SpatialCaptures`. Draft contracts remain under `Library/DungeonDecorator/SpatialDrafts` until a human approves the latest capture hash.
+
+The Preference Studio's **에셋 공간 규칙 / Asset Geometry** workspace is the human gate. `승인` is disabled when technical errors exist. `수정 필요` records issue types and a comment; `판단 불가` requests a better camera or overlay instead of forcing failure. AI suggestions are displayed separately and never count as approval.
+
 ## MCP safety model
 
 The MCP bridge binds only to `127.0.0.1`, generates an Editor-session nonce, and writes connection details under `Library/DungeonDecorator/session.json`. Agent tools can read project context and manipulate preview state only. They cannot call Apply.
@@ -41,3 +51,5 @@ The MCP bridge binds only to `127.0.0.1`, generates an Editor-session nonce, and
 Open **Tools > Concept Room Decorator > MCP Bridge Setup** to copy the Node bridge to a stable project-local path and generate project-scoped configuration. The MCP workflow ends with `submit_visual_review`; final Apply remains available only in Unity.
 
 The Node bridge optionally starts `unity-ctx mcp` and merges both read-only tool lists. Set `UNITY_CTX_BIN` when the executable is not on `PATH`. Every preview and validation response includes the manifest hash, geometry-profile hash, and seed. The bridge never exposes Unity Apply or a unity-ctx mutation tool.
+
+Spatial tools available to agents are `inspect_spatial_calibration`, `capture_spatial_calibration`, `get_spatial_contract_draft`, `submit_spatial_contract_proposal`, and `get_deterministic_validation_report`. They are intentionally proposal-only. The separate loopback Spatial Review Bridge is the only web path that can invoke the human-reviewed `unity-ctx spatial apply --write` flow.
