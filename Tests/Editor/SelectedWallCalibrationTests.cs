@@ -1,11 +1,33 @@
 using NUnit.Framework;
+using UnityEditor.UIElements;
 using UnityEngine;
+using UnityEngine.UIElements;
 using UnityDecoScene.DungeonDecorator.Editor;
 
 namespace UnityDecoScene.DungeonDecorator.Tests
 {
     public sealed class SelectedWallCalibrationTests
     {
+        [Test]
+        public void BeginnerWindowLoadsStepByStepUxmlWorkflow()
+        {
+            var window = ScriptableObject.CreateInstance<SpatialCalibrationWindow>();
+            try
+            {
+                window.CreateGUI();
+                Assert.That(window.rootVisualElement.Q<ObjectField>("subject-descriptor-field"), Is.Not.Null);
+                Assert.That(window.rootVisualElement.Q<DropdownField>("relationship-field"), Is.Not.Null);
+                Assert.That(window.rootVisualElement.Q<Button>("start-button").text, Does.Contain("캘리브레이션"));
+                Assert.That(window.rootVisualElement.Q<Button>("start-button").enabledSelf, Is.False);
+                Assert.That(window.rootVisualElement.Q<Button>("capture-button").enabledSelf, Is.False);
+                Assert.That(window.rootVisualElement.Q<Foldout>("geometry-foldout").value, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(window);
+            }
+        }
+
         [Test]
         public void AnalyzeUsesSelectedLocalFaceAndKeepsWallUpWhenFlipped()
         {
