@@ -137,6 +137,48 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void WallBackedFloorSupportedSessionPlacesWallBottomOnFloor()
+        {
+            var subject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var descriptor = ScriptableObject.CreateInstance<DecorAssetDescriptor>();
+            try
+            {
+                wall.transform.SetPositionAndRotation(
+                    new Vector3(3f, 7f, -2f),
+                    Quaternion.Euler(0f, 31f, 0f));
+                wall.transform.localScale = new Vector3(6f, 4f, 0.25f);
+                descriptor.InitializeFromScan(
+                    "dddddddddddddddddddddddddddddddd",
+                    subject,
+                    new Bounds(Vector3.zero, Vector3.one),
+                    DecorAssetType.Prop);
+
+                var session = SpatialCalibrationSession.Begin(
+                    descriptor, null, SpatialCalibrationTemplate.WallBackedFloorSupported,
+                    wall, SpatialWallNormalAxis.LocalForward, false);
+                try
+                {
+                    var wallBounds = session.WallFixture.GetComponent<Renderer>().bounds;
+                    Assert.That(session.FloorFixture, Is.Not.Null);
+                    Assert.That(wallBounds.min.y, Is.EqualTo(0f).Within(0.0001f));
+                    Assert.That(session.WallSurface.Origin.y, Is.EqualTo(2f).Within(0.0001f));
+                    Assert.That(SpatialCalibrationValidator.Validate(session).Passed, Is.True);
+                }
+                finally
+                {
+                    session.Dispose();
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(descriptor);
+                Object.DestroyImmediate(subject);
+                Object.DestroyImmediate(wall);
+            }
+        }
+
+        [Test]
         public void CapturePreflightRejectsObbThatCrossesWallBehindValidContactFrame()
         {
             var subject = GameObject.CreatePrimitive(PrimitiveType.Cube);

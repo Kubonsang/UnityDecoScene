@@ -250,17 +250,21 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private void CreateWallFixture()
         {
-            var canonicalOrigin = new Vector3(0f, 1.4f, 0f);
             if (SourceWallObject == null)
             {
+                var defaultOrigin = new Vector3(0f, RequiresFloorFixture ? 2f : 1.4f, 0f);
                 WallFixture = CreateFixture("Calibration Wall", new Vector3(6f, 4f, 0.1f),
-                    new Vector3(0f, 2f, -0.05f), new Color(0.28f, 0.3f, 0.34f));
+                    defaultOrigin + Vector3.back * 0.05f, new Color(0.28f, 0.3f, 0.34f));
                 WallSurface = new SpatialCalibrationSurface(
-                    canonicalOrigin, Vector3.forward, Vector3.right, Vector3.up, new Vector2(6f, 4f));
+                    defaultOrigin, Vector3.forward, Vector3.right, Vector3.up, new Vector2(6f, 4f));
                 return;
             }
 
             var sourceSurface = SpatialWallSurfaceUtility.Analyze(SourceWallObject, WallNormalAxis, FlipWallNormal);
+            var canonicalOrigin = new Vector3(
+                0f,
+                RequiresFloorFixture ? sourceSurface.Size.y * 0.5f : 1.4f,
+                0f);
             var alignment = SpatialWallSurfaceUtility.CanonicalAlignment(sourceSurface);
             WallFixture = InstantiateTemporary(SourceWallObject, $"Selected Wall - {SourceWallObject.name}");
             WallFixture.transform.localScale = SourceWallObject.transform.lossyScale;
