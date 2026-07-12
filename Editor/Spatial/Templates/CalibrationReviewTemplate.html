@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>빠른 공간 캘리브레이션 검수</title>
+  <style>
+    :root{color-scheme:dark;--bg:#101318;--panel:#191e26;--line:#303947;--text:#eef3f8;--muted:#9ba9b8;--green:#56d39b;--orange:#f5a95b;--red:#f36f79;--blue:#66a8ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,sans-serif}header{position:sticky;top:0;z-index:5;padding:18px 24px;background:#12161ddd;border-bottom:1px solid var(--line);backdrop-filter:blur(12px)}header h1{font-size:19px;margin:0 0 5px}header p{margin:0;color:var(--muted)}main{max-width:1480px;margin:auto;padding:22px}.summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}.pill{padding:7px 11px;background:var(--panel);border:1px solid var(--line);border-radius:999px}.case{margin:0 0 18px;padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:14px}.case-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}.case-head h2{font-size:17px;margin:0}.status{margin-left:auto;color:var(--orange)}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.view{margin:0}.view img{width:100%;aspect-ratio:1;object-fit:contain;background:#0c0f13;border:1px solid var(--line);border-radius:9px}.view figcaption{padding-top:5px;color:var(--muted);text-align:center}.measurements{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}.metric{padding:6px 9px;background:#11161d;border-radius:7px;color:var(--muted)}.metric b{color:var(--text)}.actions{display:flex;gap:8px;margin-top:14px}.actions button,.mode button{border:1px solid var(--line);border-radius:8px;background:#222a35;color:var(--text);padding:9px 13px;cursor:pointer}.actions .approve{background:#174c39;border-color:#287a5c}.actions .revision{background:#55361d;border-color:#8b592f}.actions button:disabled{opacity:.35;cursor:not-allowed}.mode{display:flex;gap:6px;margin-left:auto}.mode button.active{border-color:var(--blue);color:#cfe3ff}.notice{margin-top:9px;color:var(--muted)}.failed{border-color:#6d343a}.failed .status{color:var(--red)}.empty{text-align:center;padding:60px;color:var(--muted)}@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}
+  </style>
+</head>
+<body>
+<header><h1>빠른 공간 캘리브레이션 검수</h1><p>기술 검사는 Unity가 완료했습니다. 원본 4뷰를 보고 실제 이용자가 관계의 자연스러움만 판정합니다.</p></header>
+<main><div id="app"></div></main>
+<script>
+const workflow=__WORKFLOW_JSON__;
+const generated="__GENERATED_UTC__";
+const views=[['front','정면'],['side','측면'],['top','상단'],['contact','접촉 확대']];
+let nonce='';
+const reviewable=workflow.items.filter(x=>['AwaitingHumanReview','TechnicalFailed','UnableToJudge','RevisionRequested'].includes(x.status));
+const toFileUrl=p=>'file:///'+encodeURI(String(p||'').replaceAll('\\','/'));
+const imageUrl=(item,index,evidence)=>location.protocol==='file:'?toFileUrl((evidence?item.evidencePaths:item.rawPaths)[index]):`/api/spatial/workflow/image/${encodeURIComponent(item.id)}/${views[index][0]}?evidence=${evidence?1:0}&hash=${item.captureHash}`;
+const metrics=item=>(item.contacts||[]).flatMap(c=>[
+  `<span class="metric">${c.ruleId} 간격 <b>${Number(c.gap).toFixed(4)}m</b></span>`,
+  `<span class="metric">관통 <b>${Number(c.penetration).toFixed(4)}m</b></span>`,
+  `<span class="metric">지지 <b>${Math.round(Number(c.support)*100)}%</b></span>`]).join('');
+function render(){
+ const counts=Object.fromEntries(['Pending','AwaitingHumanReview','Approved','TechnicalFailed','NeedsRelationReview'].map(s=>[s,workflow.items.filter(x=>x.status===s).length]));
+ document.querySelector('#app').innerHTML=`<div class="summary"><span class="pill">전체 ${workflow.items.length}</span><span class="pill">검수 대기 ${counts.AwaitingHumanReview}</span><span class="pill">승인 ${counts.Approved}</span><span class="pill">기술 실패 ${counts.TechnicalFailed}</span><span class="pill">관계 확인 ${counts.NeedsRelationReview}</span></div>`+(reviewable.length?reviewable.map(card).join(''):`<div class="empty">현재 사용자 검수 대기 항목이 없습니다.</div>`);
+ document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.closest('.case'),b.dataset.mode==='evidence'));
+ document.querySelectorAll('[data-decision]').forEach(b=>b.onclick=()=>decide(b.closest('.case').dataset.id,b.dataset.decision));
+}
+function card(item){const failed=item.status==='TechnicalFailed';return `<section class="case ${failed?'failed':''}" data-id="${item.id}"><div class="case-head"><div><h2>${item.displayName}</h2><small>${item.template||'관계 미확정'} · ${item.assetId}</small></div><span class="status">${item.status}</span><div class="mode"><button class="active" data-mode="raw">원본</button><button data-mode="evidence">검사선</button></div></div><div class="grid">${views.map(([id,label],i)=>`<figure class="view"><img src="${failed?'':imageUrl(item,i,false)}" data-raw="${imageUrl(item,i,false)}" data-evidence="${imageUrl(item,i,true)}" alt="${label}"><figcaption>${label}</figcaption></figure>`).join('')}</div><div class="measurements">${metrics(item)}</div>${failed?`<p class="notice">${(item.errors||[]).join(' · ')}</p>`:`<div class="actions"><button class="approve" data-decision="Approved">승인</button><button class="revision" data-decision="RevisionRequested">수정 필요</button><button data-decision="UnableToJudge">판단 불가</button></div><p class="notice">계약 ${String(item.technicalReportHash||'').slice(0,8)} · 캡처 ${String(item.captureHash||'').slice(0,8)}</p>`}</section>`}
+function setMode(root,evidence){root.querySelectorAll('img').forEach(i=>i.src=evidence?i.dataset.evidence:i.dataset.raw);root.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',(b.dataset.mode==='evidence')===evidence))}
+async function connect(){for(let i=0;i<12;i++){try{const r=await fetch('http://127.0.0.1:4174/api/health');if(r.ok){const x=await r.json();nonce=x.nonce||'';return}}catch{}await new Promise(r=>setTimeout(r,500))}}
+async function decide(id,decision){const item=workflow.items.find(x=>x.id===id);const root=document.querySelector(`[data-id="${id}"]`);const note=root.querySelector('.notice');if(!nonce){note.textContent='로컬 승인 브리지가 연결되지 않았습니다. Unity에서 검수 페이지를 다시 여세요.';return}try{const r=await fetch('http://127.0.0.1:4174/api/spatial/workflow/review',{method:'POST',headers:{'Content-Type':'application/json','X-Spatial-Review-Nonce':nonce},body:JSON.stringify({id,decision,captureHash:item.captureHash,reviewer:localStorage.getItem('spatial-reviewer')||'local-user',issues:[],comment:''})});const x=await r.json();if(!r.ok)throw new Error(x.error||'승인 저장 실패');root.querySelector('.status').textContent=x.status;root.querySelectorAll('button').forEach(b=>b.disabled=true);note.textContent='사용자 판정이 계약 해시와 함께 저장되었습니다.'}catch(e){note.textContent=e.message}}
+render();connect();
+</script>
+</body>
+</html>
