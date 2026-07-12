@@ -12,10 +12,19 @@ const execute = promisify(execFile);
 const projectArg = process.argv.indexOf("--project");
 const projectRoot = path.resolve(projectArg >= 0 ? process.argv[projectArg + 1] : process.cwd());
 const sessionPath = path.join(projectRoot, "Library", "DungeonDecorator", "session.json");
+const workflowRoot = path.join(projectRoot, "Library", "DungeonDecorator", "CalibrationWorkflow");
+const workflowStatePath = path.join(workflowRoot, "state.json");
+const workflowPagePath = path.join(workflowRoot, "review.html");
 const unityCtx = process.env.UNITY_CTX_BIN || "unity-ctx";
 const reviewNonce = crypto.randomBytes(24).toString("hex");
-const allowedOrigins = new Set(["http://localhost:4173", "http://127.0.0.1:4173"]);
 const port = Number(process.env.SPATIAL_REVIEW_PORT || 4174);
+const allowedOrigins = new Set([
+  "null",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+  `http://localhost:${port}`,
+  `http://127.0.0.1:${port}`,
+]);
 
 const server = http.createServer(async (request, response) => {
   const origin = request.headers.origin || "";
@@ -31,7 +40,40 @@ const server = http.createServer(async (request, response) => {
 
   try {
     if (request.method === "GET" && requestUrl.pathname === "/api/health") {
-      return send(response, 200, { connected: fs.existsSync(sessionPath), nonce: reviewNonce, projectRoot });
+      return send(response, 200, {
+        connected: fs.existsSync(sessionPath),
+        workflowAvailable: fs.existsSync(workflowStatePath),
+        nonce: reviewNonce,
+        projectRoot,
+      });
+    }
+    if (request.method === "GET" && requestUrl.pathname === "/workflow") {
+      if (!fs.existsSync(workflowPagePath)) throw new Error("Calibration workflow review page is not available.");
+      response.statusCode = 200;
+      response.setHeader("Content-Type", "text/html; charset=utf-8");
+      response.setHeader("Cache-Control", "no-store");
+      return response.end(fs.readFileSync(workflowPagePath));
+    }
+    if (request.method === "GET" && requestUrl.pathname === "/api/spatial/workflow") {
+      return send(response, 200, loadWorkflow());
+    }
+    if (request.method === "GET" && requestUrl.pathname.startsWith("/api/spatial/workflow/image/")) {
+      const parts = requestUrl.pathname.slice("/api/spatial/workflow/image/".length).split("/");
+      const itemId = decodeURIComponent(parts[0] || "");
+      const view = parts[1] || "";
+      if (!itemId || !["front", "side", "top", "contact"].includes(view)) throw new Error("Unsupported workflow capture view.");
+      const state = loadWorkflow();
+      const item = state.items?.find(value => value.id === itemId);
+      if (!item) throw new Error("Calibration workflow item was not found.");
+      if (requestUrl.searchParams.get("hash") !== item.captureHash) throw new Error("Capture hash is stale.");
+      const suffix = requestUrl.searchParams.get("evidence") === "1" ? "-evidence" : "";
+      const filePath = path.join(item.captureDirectory, `${view}${suffix}.png`);
+      const captureRoot = path.join(projectRoot, "Library", "DungeonDecorator", "SpatialCaptures");
+      if (!inside(captureRoot, filePath) || !fs.existsSync(filePath)) throw new Error("Workflow capture image is not available.");
+      response.statusCode = 200;
+      response.setHeader("Content-Type", "image/png");
+      response.setHeader("Cache-Control", "no-store");
+      return response.end(fs.readFileSync(filePath));
     }
     if (request.method === "GET" && requestUrl.pathname === "/api/spatial/session") {
       const inspection = resultOf(await callUnity("inspect_spatial_calibration", {}));
@@ -60,6 +102,11 @@ const server = http.createServer(async (request, response) => {
       requireNonce(request);
       const body = await readJson(request);
       return send(response, 200, await reviewDraft(body));
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/spatial/workflow/review") {
+      requireNonce(request);
+      const body = await readJson(request);
+      return send(response, 200, await reviewWorkflowItem(body));
     }
     return send(response, 404, { error: "Not found." });
   } catch (error) {
@@ -100,6 +147,54 @@ async function reviewDraft(body) {
   const applied = await runCtx(["spatial", "apply", "--current", currentPath, "--draft", draftPath, "--write", "--json"]);
   const verified = await runCtx(["spatial", "validate", "--json", currentPath]);
   return { status: "Approved", draftPath, currentPath, review, diff, applied, verified };
+}
+
+async function reviewWorkflowItem(body) {
+  const state = loadWorkflow();
+  const item = state.items?.find(value => value.id === String(body.id || ""));
+  if (!item) throw new Error("Calibration workflow item was not found.");
+  if (item.status !== "AwaitingHumanReview") throw new Error(`Item is not awaiting review: ${item.status}`);
+  if (!item.captureHash || item.captureHash !== String(body.captureHash || "")) throw new Error("Capture hash is stale.");
+  if (!item.draftPath || !path.isAbsolute(item.draftPath) || !inside(path.join(projectRoot, "Library"), item.draftPath)) {
+    throw new Error("Workflow draft is outside the project Library folder.");
+  }
+  const result = await reviewDraft({
+    draftPath: item.draftPath,
+    decision: body.decision,
+    reviewer: body.reviewer,
+    issues: body.issues || [],
+    comment: body.comment || "",
+  });
+  item.status = result.status;
+  item.reviewer = String(body.reviewer || "");
+  item.reviewedUtc = new Date().toISOString();
+  item.comment = String(body.comment || "");
+  state.updatedUtc = new Date().toISOString();
+  state.status = deriveWorkflowStatus(state);
+  atomicJson(workflowStatePath, state);
+  return { status: result.status, id: item.id, captureHash: item.captureHash };
+}
+
+function loadWorkflow() {
+  if (!fs.existsSync(workflowStatePath)) throw new Error("Calibration workflow has not been created in Unity.");
+  const state = JSON.parse(fs.readFileSync(workflowStatePath, "utf8"));
+  if (state.schemaVersion !== 1 || !Array.isArray(state.items)) throw new Error("Unsupported calibration workflow state.");
+  return state;
+}
+
+function deriveWorkflowStatus(state) {
+  if (state.items.some(item => item.status === "AwaitingHumanReview")) return "AwaitingHumanReview";
+  if (state.items.some(item => item.status === "TechnicalFailed")) return "TechnicalFailed";
+  if (state.items.some(item => item.status === "NeedsRelationReview")) return "NeedsRelationReview";
+  if (state.items.length && state.items.every(item => item.status === "Approved")) return "Approved";
+  return "Pending";
+}
+
+function atomicJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  fs.renameSync(temporary, filePath);
 }
 
 function contractPath(contract) {
