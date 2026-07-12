@@ -36,7 +36,6 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static double nextPoll;
         private static bool running;
-        private static bool runQueued;
         private static Process reviewBridge;
 
         public static event Action Changed;
@@ -234,18 +233,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private static void PollRequest()
         {
             if (running || EditorApplication.isCompiling || EditorApplication.isUpdating) return;
-            if (runQueued)
-            {
-                runQueued = false;
-                RunNextBatch();
-                return;
-            }
             if (EditorApplication.timeSinceStartup < nextPoll) return;
             nextPoll = EditorApplication.timeSinceStartup + PollInterval;
             var request = ProjectPath(RequestRelativePath);
             if (!File.Exists(request)) return;
             File.Delete(request);
-            runQueued = true;
+            RunNextBatch();
         }
 
         private static SpatialCalibrationWorkflowState NewState()
