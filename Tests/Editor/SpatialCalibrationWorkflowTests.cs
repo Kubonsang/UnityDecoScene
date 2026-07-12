@@ -77,5 +77,13 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             Assert.That(html, Does.Not.Contain("__WORKFLOW_JSON__"));
             Assert.That(html, Does.Not.Contain("__GENERATED_UTC__"));
         }
+
+        [Test]
+        public void MissingUnityCtxConfigurationReturnsEmptyInsteadOfGuessing()
+        {
+            var value = SpatialCalibrationWorkflow.ResolveUnityCtxBinary();
+            Assert.That(value, Is.Not.Null);
+            if (!string.IsNullOrWhiteSpace(value)) Assert.That(System.IO.File.Exists(value), Is.True);
+        }
     }
 }

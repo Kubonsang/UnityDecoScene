@@ -21,6 +21,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public const string ReviewRelativePath = "Library/DungeonDecorator/CalibrationWorkflow/review.html";
         public const string AgentBriefRelativePath = "Library/DungeonDecorator/CalibrationWorkflow/agent-brief.json";
         private const string ReviewTemplatePath = "Packages/com.unitydecoscene.dungeon-decorator/Editor/Spatial/Templates/CalibrationReviewTemplate.html";
+        private const string UnityCtxPreferenceKey = "DungeonDecorator.FastCalibration.UnityCtxPath";
         private const double PollInterval = 0.5d;
 
         private static readonly Dictionary<string, SpatialCalibrationTemplate> ApprovedRelationDefaults =
@@ -63,6 +64,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         [MenuItem("Tools/Concept Room Decorator/Fast Calibration/Open Human Review")]
         public static void OpenReviewMenu() => OpenReview();
+
+        [MenuItem("Tools/Concept Room Decorator/Fast Calibration/Configure unity-ctx")]
+        public static void ConfigureUnityCtx()
+        {
+            var selected = EditorUtility.OpenFilePanel("Select unity-ctx executable", ProjectRoot(), "exe");
+            if (!string.IsNullOrWhiteSpace(selected)) EditorPrefs.SetString(UnityCtxPreferenceKey, selected);
+        }
 
         public static SpatialCalibrationWorkflowState LoadState()
         {
@@ -447,7 +455,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden
-                });
+                }.WithEnvironment("UNITY_CTX_BIN", ResolveUnityCtxBinary()));
             }
             catch (Exception exception) { Debug.LogWarning($"Spatial review bridge could not start: {exception.Message}"); }
         }
@@ -470,6 +478,37 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             catch { return false; }
         }
 
+        public static string ResolveUnityCtxBinary()
+        {
+            var candidates = new[]
+            {
+                EditorPrefs.GetString(UnityCtxPreferenceKey, string.Empty),
+                Environment.GetEnvironmentVariable("UNITY_CTX_BIN"),
+                ProjectPath("Library/DungeonDecorator/Tools/unity-ctx.exe")
+            };
+            var direct = candidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
+            if (!string.IsNullOrWhiteSpace(direct)) return Path.GetFullPath(direct);
+            try
+            {
+                using var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "where.exe",
+                    Arguments = "unity-ctx",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                });
+                if (process != null && process.WaitForExit(1500) && process.ExitCode == 0)
+                {
+                    var path = process.StandardOutput.ReadLine();
+                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return Path.GetFullPath(path);
+                }
+            }
+            catch { }
+            return string.Empty;
+        }
+
         private static void AtomicWrite(string path, string content)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ProjectRoot());
@@ -481,5 +520,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static string ProjectRoot() => Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
         private static string ProjectPath(string relative) => Path.GetFullPath(Path.Combine(ProjectRoot(), relative));
+
+        private static ProcessStartInfo WithEnvironment(this ProcessStartInfo info, string key, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value)) info.EnvironmentVariables[key] = value;
+            return info;
+        }
     }
 }
