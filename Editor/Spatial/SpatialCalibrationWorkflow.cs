@@ -36,6 +36,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static double nextPoll;
         private static bool running;
+        private static bool runQueued;
         private static Process reviewBridge;
 
         public static event Action Changed;
@@ -140,9 +141,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             if (running) return;
             running = true;
-            var state = ScanOrResume();
+            SpatialCalibrationWorkflowState state = null;
             try
             {
+                state = ScanOrResume();
                 var batchSize = Mathf.Clamp(requestedBatchSize ?? state.batchSize, 1, 32);
                 var candidates = state.items
                     .Where(item => item.status is SpatialCalibrationWorkflowStates.Pending
@@ -169,8 +171,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             }
             catch (Exception exception)
             {
-                state.status = "Blocked";
-                SaveAndGenerate(state);
+                if (state != null)
+                {
+                    state.status = "Blocked";
+                    SaveAndGenerate(state);
+                }
                 Debug.LogException(exception);
             }
             finally
@@ -228,12 +233,19 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static void PollRequest()
         {
-            if (running || EditorApplication.timeSinceStartup < nextPoll) return;
+            if (running || EditorApplication.isCompiling || EditorApplication.isUpdating) return;
+            if (runQueued)
+            {
+                runQueued = false;
+                RunNextBatch();
+                return;
+            }
+            if (EditorApplication.timeSinceStartup < nextPoll) return;
             nextPoll = EditorApplication.timeSinceStartup + PollInterval;
             var request = ProjectPath(RequestRelativePath);
-            if (!File.Exists(request) || EditorApplication.isCompiling || EditorApplication.isUpdating) return;
+            if (!File.Exists(request)) return;
             File.Delete(request);
-            EditorApplication.delayCall += () => RunNextBatch();
+            runQueued = true;
         }
 
         private static SpatialCalibrationWorkflowState NewState()
