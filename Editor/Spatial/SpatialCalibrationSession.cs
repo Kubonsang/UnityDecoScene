@@ -31,6 +31,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public List<string> DraftPaths { get; } = new();
         public string AgentProposalJson { get; set; }
         public IReadOnlyList<SpatialContactRuleContract> Rules => rules;
+        public bool RequiresWallFixture => Template is SpatialCalibrationTemplate.WallMounted
+            or SpatialCalibrationTemplate.WallBackedFloorSupported;
+        public bool RequiresFloorFixture => Template is SpatialCalibrationTemplate.FloorSupported
+            or SpatialCalibrationTemplate.WallBackedFloorSupported;
 
         private readonly List<SpatialContactRuleContract> rules = new();
         private Scene calibrationScene;
@@ -149,8 +153,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             StageUtility.GoToStage(previewStage, true);
             calibrationScene = previewStage.scene;
 
-            FloorFixture = CreateFixture("Calibration Floor", new Vector3(6f, 0.1f, 6f), new Vector3(0f, -0.05f, 0f), new Color(0.23f, 0.25f, 0.28f));
-            CreateWallFixture();
+            if (RequiresFloorFixture)
+                FloorFixture = CreateFixture("Calibration Floor", new Vector3(6f, 0.1f, 6f),
+                    new Vector3(0f, -0.05f, 0f), new Color(0.23f, 0.25f, 0.28f));
+            if (RequiresWallFixture) CreateWallFixture();
             SubjectObject = InstantiateTemporary(Descriptor.Prefab, "Calibration Subject");
             if (TargetPrefab != null) TargetObject = InstantiateTemporary(TargetPrefab, "Calibration Target");
             MoveToCalibrationScene(FloorFixture);

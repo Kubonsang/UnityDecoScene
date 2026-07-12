@@ -17,6 +17,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             if (session?.SubjectObject == null) throw new ArgumentNullException(nameof(session));
             report ??= SpatialCalibrationValidator.Validate(session);
+            SpatialCalibrationCapturePreflight.EnsureCanCapture(session, report);
             var directory = Path.GetFullPath(Path.Combine(Application.dataPath, $"../Library/DungeonDecorator/SpatialCaptures/{session.SessionId}"));
             Directory.CreateDirectory(directory);
             var set = new SpatialCaptureSet { session_id = session.SessionId };

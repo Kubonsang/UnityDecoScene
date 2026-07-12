@@ -39,9 +39,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
                 var session = SpatialCalibrationSession.Begin(descriptor, null, SpatialCalibrationTemplate.FloorSupported);
                 try
                 {
+                    Assert.That(session.FloorFixture, Is.Not.Null);
+                    Assert.That(session.WallFixture, Is.Null);
                     var first = SpatialCalibrationValidator.Validate(session);
                     var second = SpatialCalibrationValidator.Validate(session);
                     Assert.That(first.error_count, Is.Zero);
+                    Assert.That(SpatialCalibrationCapturePreflight.Inspect(session, first), Is.Empty);
                     Assert.That(first.status, Is.EqualTo(SpatialContractStates.AwaitingHumanReview));
                     Assert.That(second.report_hash, Is.EqualTo(first.report_hash));
                 }

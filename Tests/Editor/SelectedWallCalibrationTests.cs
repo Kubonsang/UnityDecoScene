@@ -111,6 +111,7 @@ namespace UnityDecoScene.DungeonDecorator.Tests
                     var report = SpatialCalibrationValidator.Validate(session);
                     Assert.That(session.SourceWallObject, Is.SameAs(wall));
                     Assert.That(session.WallFixture, Is.Not.SameAs(wall));
+                    Assert.That(session.FloorFixture, Is.Null);
                     Assert.That(session.WallFixture.name, Does.Contain(wall.name));
                     Assert.That(session.WallSurface.Normal, Is.EqualTo(Vector3.forward));
                     Assert.That(session.WallSurface.Size.x, Is.EqualTo(6f).Within(0.0001f));
@@ -126,6 +127,44 @@ namespace UnityDecoScene.DungeonDecorator.Tests
                 Assert.That(wall.transform.position, Is.EqualTo(originalPosition));
                 Assert.That(wall.transform.rotation, Is.EqualTo(originalRotation));
                 Assert.That(wall.transform.localScale, Is.EqualTo(originalScale));
+            }
+            finally
+            {
+                Object.DestroyImmediate(descriptor);
+                Object.DestroyImmediate(subject);
+                Object.DestroyImmediate(wall);
+            }
+        }
+
+        [Test]
+        public void CapturePreflightRejectsObbThatCrossesWallBehindValidContactFrame()
+        {
+            var subject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var descriptor = ScriptableObject.CreateInstance<DecorAssetDescriptor>();
+            try
+            {
+                wall.transform.localScale = new Vector3(5f, 4f, 0.2f);
+                descriptor.InitializeFromScan(
+                    "cccccccccccccccccccccccccccccccc",
+                    subject,
+                    new Bounds(Vector3.zero, Vector3.one),
+                    DecorAssetType.Prop);
+                var session = SpatialCalibrationSession.Begin(
+                    descriptor, null, SpatialCalibrationTemplate.WallMounted,
+                    wall, SpatialWallNormalAxis.LocalForward, false);
+                try
+                {
+                    var report = SpatialCalibrationValidator.Validate(session);
+                    Assert.That(report.Passed, Is.True);
+                    session.Geometry.collisionProxies[0].size.z += 0.1f;
+                    var issues = SpatialCalibrationCapturePreflight.Inspect(session, report);
+                    Assert.That(issues, Has.Some.StartsWith("CAPTURE_PROXY_SURFACE_INTERSECTION"));
+                }
+                finally
+                {
+                    session.Dispose();
+                }
             }
             finally
             {
