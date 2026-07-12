@@ -29,6 +29,22 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
         }
 
         [Test]
+        public void AssetDraftSerializationOmitsInactiveInteractionAndEmptyReview()
+        {
+            var document = new SpatialContractDocument
+            {
+                contract_type = "asset",
+                state = SpatialContractStates.AwaitingHumanReview,
+                asset = new AssetSpatialContractPayload { asset_guid = "0123456789abcdef0123456789abcdef" },
+                technical = new SpatialTechnicalEvidence { passed = true }
+            };
+            var json = SpatialContractIO.SerializeForStorage(document, false);
+            Assert.That(json, Does.Contain("\"asset\":"));
+            Assert.That(json, Does.Not.Contain("\"interaction\":"));
+            Assert.That(json, Does.Not.Contain("\"review\":"));
+        }
+
+        [Test]
         public void FloorCalibrationProducesDeterministicTechnicalEvidence()
         {
             var prefab = GameObject.CreatePrimitive(PrimitiveType.Cube);

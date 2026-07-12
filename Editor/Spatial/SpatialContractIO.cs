@@ -42,6 +42,20 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return document;
         }
 
+        public static string SerializeForStorage(SpatialContractDocument document, bool prettyPrint = true)
+        {
+            if (document == null) throw new ArgumentNullException(nameof(document));
+            if (document.contract_type == "asset" && document.asset != null)
+                return document.review == null
+                    ? JsonUtility.ToJson(new AssetDraftJson(document), prettyPrint)
+                    : JsonUtility.ToJson(new ReviewedAssetJson(document), prettyPrint);
+            if (document.contract_type == "interaction" && document.interaction != null)
+                return document.review == null
+                    ? JsonUtility.ToJson(new InteractionDraftJson(document), prettyPrint)
+                    : JsonUtility.ToJson(new ReviewedInteractionJson(document), prettyPrint);
+            throw new InvalidDataException("Spatial contract must contain exactly one payload matching contract_type.");
+        }
+
         public static bool ApplyApprovedAssetContract(string path, DecorAssetDescriptor descriptor, out string reason)
         {
             reason = null;
@@ -167,7 +181,69 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static void WriteJson(string path, SpatialContractDocument document)
         {
-            File.WriteAllText(path, JsonUtility.ToJson(document, true) + Environment.NewLine, new UTF8Encoding(false));
+            File.WriteAllText(path, SerializeForStorage(document) + Environment.NewLine, new UTF8Encoding(false));
+        }
+
+        [Serializable]
+        private sealed class AssetDraftJson
+        {
+            public int contract_version;
+            public string contract_type;
+            public string state;
+            public AssetSpatialContractPayload asset;
+            public SpatialTechnicalEvidence technical;
+            public AssetDraftJson(SpatialContractDocument value)
+            {
+                contract_version = value.contract_version; contract_type = value.contract_type;
+                state = value.state; asset = value.asset; technical = value.technical;
+            }
+        }
+
+        [Serializable]
+        private sealed class ReviewedAssetJson
+        {
+            public int contract_version;
+            public string contract_type;
+            public string state;
+            public AssetSpatialContractPayload asset;
+            public SpatialTechnicalEvidence technical;
+            public SpatialHumanReview review;
+            public ReviewedAssetJson(SpatialContractDocument value)
+            {
+                contract_version = value.contract_version; contract_type = value.contract_type;
+                state = value.state; asset = value.asset; technical = value.technical; review = value.review;
+            }
+        }
+
+        [Serializable]
+        private sealed class InteractionDraftJson
+        {
+            public int contract_version;
+            public string contract_type;
+            public string state;
+            public InteractionSpatialContractPayload interaction;
+            public SpatialTechnicalEvidence technical;
+            public InteractionDraftJson(SpatialContractDocument value)
+            {
+                contract_version = value.contract_version; contract_type = value.contract_type;
+                state = value.state; interaction = value.interaction; technical = value.technical;
+            }
+        }
+
+        [Serializable]
+        private sealed class ReviewedInteractionJson
+        {
+            public int contract_version;
+            public string contract_type;
+            public string state;
+            public InteractionSpatialContractPayload interaction;
+            public SpatialTechnicalEvidence technical;
+            public SpatialHumanReview review;
+            public ReviewedInteractionJson(SpatialContractDocument value)
+            {
+                contract_version = value.contract_version; contract_type = value.contract_type;
+                state = value.state; interaction = value.interaction; technical = value.technical; review = value.review;
+            }
         }
     }
 }
