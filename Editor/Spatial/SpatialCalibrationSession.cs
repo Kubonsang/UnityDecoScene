@@ -107,13 +107,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var renderers = new List<Renderer>();
             if (SubjectObject != null) renderers.AddRange(SubjectObject.GetComponentsInChildren<Renderer>(true));
             if (TargetObject != null) renderers.AddRange(TargetObject.GetComponentsInChildren<Renderer>(true));
-            if (FloorFixture != null) renderers.AddRange(FloorFixture.GetComponentsInChildren<Renderer>(true));
-            if (WallFixture != null && SourceWallObject == null)
-                renderers.AddRange(WallFixture.GetComponentsInChildren<Renderer>(true));
             if (renderers.Count == 0) return new Bounds(Vector3.zero, Vector3.one);
             var result = renderers[0].bounds;
             for (var i = 1; i < renderers.Count; i++) result.Encapsulate(renderers[i].bounds);
-            if (SourceWallObject != null) result.Expand(new Vector3(1.2f, 1.2f, 1.2f));
+            var padding = new Vector3(
+                Mathf.Max(0.35f, result.size.x * 0.15f),
+                Mathf.Max(0.35f, result.size.y * 0.15f),
+                Mathf.Max(0.35f, result.size.z * 0.15f));
+            result.Expand(padding);
             return result;
         }
 

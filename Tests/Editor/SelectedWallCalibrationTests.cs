@@ -60,6 +60,23 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void BatchChoosesBroadWallFaceInsteadOfThinEdge()
+        {
+            var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            try
+            {
+                wall.transform.localScale = new Vector3(5f, 3f, 0.2f);
+                var choice = SpatialDungeonCalibrationBatch.ChooseWallFace(wall);
+                Assert.That(choice.Axis, Is.EqualTo(SpatialWallNormalAxis.LocalForward));
+                Assert.That(choice.Surface.Size.x * choice.Surface.Size.y, Is.EqualTo(15f).Within(0.0001f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(wall);
+            }
+        }
+
+        [Test]
         public void WallMountedSessionClonesSelectedWallAndLeavesSourceUnchanged()
         {
             var subject = GameObject.CreatePrimitive(PrimitiveType.Cube);

@@ -23,19 +23,21 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var bounds = session.CombinedWorldBounds();
             var distance = Mathf.Max(2.5f, bounds.extents.magnitude * 2.2f);
             var center = bounds.center;
+            var contactCenter = ContactCenter(report, center);
+            var contactPosition = contactCenter
+                + new Vector3(0.8f, 0.65f, 1f).normalized * Mathf.Max(1.8f, distance * 0.75f);
             var views = new[]
             {
                 new View("front", center + Vector3.forward * distance, Quaternion.LookRotation(Vector3.back, Vector3.up), true),
                 new View("side", center + Vector3.right * distance, Quaternion.LookRotation(Vector3.left, Vector3.up), true),
                 new View("top", center + Vector3.up * distance, Quaternion.LookRotation(Vector3.down, Vector3.forward), true),
-                new View("contact", ContactCameraPosition(report, center, distance), Quaternion.identity, false)
+                new View("contact", contactPosition, Quaternion.LookRotation((contactCenter - contactPosition).normalized, Vector3.up), false)
             };
 
             foreach (var view in views)
             {
-                var rotation = view.Name == "contact" ? Quaternion.LookRotation((center - view.Position).normalized, Vector3.up) : view.Rotation;
-                set.raw_paths.Add(Render(directory, view.Name, view.Position, rotation, view.Orthographic, bounds, session, report, false));
-                set.evidence_paths.Add(Render(directory, view.Name + "-evidence", view.Position, rotation, view.Orthographic, bounds, session, report, true));
+                set.raw_paths.Add(Render(directory, view.Name, view.Position, view.Rotation, view.Orthographic, bounds, session, report, false));
+                set.evidence_paths.Add(Render(directory, view.Name + "-evidence", view.Position, view.Rotation, view.Orthographic, bounds, session, report, true));
             }
 
             set.report_path = Path.Combine(directory, "technical-report.json");
@@ -45,12 +47,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return set;
         }
 
-        private static Vector3 ContactCameraPosition(SpatialCalibrationReport report, Vector3 fallback, float distance)
+        private static Vector3 ContactCenter(SpatialCalibrationReport report, Vector3 fallback)
         {
-            var center = report?.contacts != null && report.contacts.Count > 0
+            return report?.contacts != null && report.contacts.Count > 0
                 ? report.contacts.Select(item => SpatialContractArrays.Vector(item.contact_point)).Aggregate(Vector3.zero, (sum, value) => sum + value) / report.contacts.Count
                 : fallback;
-            return center + new Vector3(0.8f, 0.65f, 1f).normalized * Mathf.Max(1.2f, distance * 0.45f);
         }
 
         private static string Render(string directory, string name, Vector3 position, Quaternion rotation, bool orthographic, Bounds bounds, SpatialCalibrationSession session, SpatialCalibrationReport report, bool evidence)
