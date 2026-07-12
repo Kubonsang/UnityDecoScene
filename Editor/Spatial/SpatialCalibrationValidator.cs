@@ -33,15 +33,15 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return report;
         }
 
-        private static CalibrationSurface ResolveSurface(SpatialCalibrationSession session, SpatialContactRuleContract rule)
+        private static SpatialCalibrationSurface ResolveSurface(SpatialCalibrationSession session, SpatialContactRuleContract rule)
         {
-            if (rule.target == "surface:wall") return new CalibrationSurface(new Vector3(0f, 2f, 0f), Vector3.forward, Vector3.right, Vector3.up, new Vector2(6f, 4f));
-            if (rule.target == "surface:floor") return new CalibrationSurface(Vector3.zero, Vector3.up, Vector3.right, Vector3.forward, new Vector2(6f, 6f));
+            if (rule.target == "surface:wall") return session.WallSurface;
+            if (rule.target == "surface:floor") return new SpatialCalibrationSurface(Vector3.zero, Vector3.up, Vector3.right, Vector3.forward, new Vector2(6f, 6f));
             var bounds = session.TargetWorldBounds();
-            return new CalibrationSurface(new Vector3(bounds.center.x, bounds.max.y, bounds.center.z), Vector3.up, Vector3.right, Vector3.forward, new Vector2(bounds.size.x, bounds.size.z));
+            return new SpatialCalibrationSurface(new Vector3(bounds.center.x, bounds.max.y, bounds.center.z), Vector3.up, Vector3.right, Vector3.forward, new Vector2(bounds.size.x, bounds.size.z));
         }
 
-        private static SpatialContactEvidence Evaluate(Transform subject, ContactFrame frame, CalibrationSurface surface, SpatialContactRuleContract rule)
+        private static SpatialContactEvidence Evaluate(Transform subject, ContactFrame frame, SpatialCalibrationSurface surface, SpatialContactRuleContract rule)
         {
             var point = subject.TransformPoint(frame.localPoint);
             var normal = subject.TransformDirection(frame.localNormal).normalized;
@@ -87,22 +87,5 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return string.Concat(sha.ComputeHash(data).Select(value => value.ToString("x2")));
         }
 
-        private readonly struct CalibrationSurface
-        {
-            public readonly Vector3 Origin;
-            public readonly Vector3 Normal;
-            public readonly Vector3 Tangent;
-            public readonly Vector3 Bitangent;
-            public readonly Vector2 Size;
-
-            public CalibrationSurface(Vector3 origin, Vector3 normal, Vector3 tangent, Vector3 bitangent, Vector2 size)
-            {
-                Origin = origin;
-                Normal = normal.normalized;
-                Tangent = tangent.normalized;
-                Bitangent = bitangent.normalized;
-                Size = size;
-            }
-        }
     }
 }

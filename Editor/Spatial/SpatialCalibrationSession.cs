@@ -16,12 +16,16 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string SessionId { get; } = Guid.NewGuid().ToString("N");
         public DecorAssetDescriptor Descriptor { get; }
         public GameObject TargetPrefab { get; }
+        public GameObject SourceWallObject { get; }
+        public SpatialWallNormalAxis WallNormalAxis { get; }
+        public bool FlipWallNormal { get; }
         public SpatialCalibrationTemplate Template { get; }
         public DecorGeometryProfile Geometry { get; }
         public GameObject SubjectObject { get; private set; }
         public GameObject TargetObject { get; private set; }
         public GameObject FloorFixture { get; private set; }
         public GameObject WallFixture { get; private set; }
+        public SpatialCalibrationSurface WallSurface { get; private set; }
         public SpatialCalibrationReport LastReport { get; set; }
         public SpatialCaptureSet CaptureSet { get; set; }
         public List<string> DraftPaths { get; } = new();
@@ -33,11 +37,20 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private Scene previousActiveScene;
         private SpatialCalibrationPreviewStage previewStage;
 
-        private SpatialCalibrationSession(DecorAssetDescriptor descriptor, GameObject targetPrefab, SpatialCalibrationTemplate template)
+        private SpatialCalibrationSession(
+            DecorAssetDescriptor descriptor,
+            GameObject targetPrefab,
+            SpatialCalibrationTemplate template,
+            GameObject sourceWallObject,
+            SpatialWallNormalAxis wallNormalAxis,
+            bool flipWallNormal)
         {
             Descriptor = descriptor;
             TargetPrefab = targetPrefab;
             Template = template;
+            SourceWallObject = sourceWallObject;
+            WallNormalAxis = wallNormalAxis;
+            FlipWallNormal = flipWallNormal;
             Geometry = DecorAssetScanner.BuildGeometryProfile(descriptor.Prefab);
             Geometry.reviewed = false;
             BuildRules();
@@ -45,11 +58,21 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         }
 
         public static SpatialCalibrationSession Begin(DecorAssetDescriptor descriptor, GameObject targetPrefab, SpatialCalibrationTemplate template)
+            => Begin(descriptor, targetPrefab, template, null, SpatialWallNormalAxis.LocalForward, false);
+
+        public static SpatialCalibrationSession Begin(
+            DecorAssetDescriptor descriptor,
+            GameObject targetPrefab,
+            SpatialCalibrationTemplate template,
+            GameObject sourceWallObject,
+            SpatialWallNormalAxis wallNormalAxis,
+            bool flipWallNormal)
         {
             if (descriptor == null || descriptor.Prefab == null) throw new ArgumentException("A descriptor with a prefab is required.");
             if (template == SpatialCalibrationTemplate.SupportedBy && targetPrefab == null) throw new ArgumentException("SupportedBy requires a target prefab.");
             Current?.Dispose();
-            Current = new SpatialCalibrationSession(descriptor, targetPrefab, template);
+            Current = new SpatialCalibrationSession(
+                descriptor, targetPrefab, template, sourceWallObject, wallNormalAxis, flipWallNormal);
             Changed?.Invoke();
             return Current;
         }
@@ -85,10 +108,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (SubjectObject != null) renderers.AddRange(SubjectObject.GetComponentsInChildren<Renderer>(true));
             if (TargetObject != null) renderers.AddRange(TargetObject.GetComponentsInChildren<Renderer>(true));
             if (FloorFixture != null) renderers.AddRange(FloorFixture.GetComponentsInChildren<Renderer>(true));
-            if (WallFixture != null) renderers.AddRange(WallFixture.GetComponentsInChildren<Renderer>(true));
+            if (WallFixture != null && SourceWallObject == null)
+                renderers.AddRange(WallFixture.GetComponentsInChildren<Renderer>(true));
             if (renderers.Count == 0) return new Bounds(Vector3.zero, Vector3.one);
             var result = renderers[0].bounds;
             for (var i = 1; i < renderers.Count; i++) result.Encapsulate(renderers[i].bounds);
+            if (SourceWallObject != null) result.Expand(new Vector3(1.2f, 1.2f, 1.2f));
             return result;
         }
 
@@ -124,7 +149,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             calibrationScene = previewStage.scene;
 
             FloorFixture = CreateFixture("Calibration Floor", new Vector3(6f, 0.1f, 6f), new Vector3(0f, -0.05f, 0f), new Color(0.23f, 0.25f, 0.28f));
-            WallFixture = CreateFixture("Calibration Wall", new Vector3(6f, 4f, 0.1f), new Vector3(0f, 2f, -0.05f), new Color(0.28f, 0.3f, 0.34f));
+            CreateWallFixture();
             SubjectObject = InstantiateTemporary(Descriptor.Prefab, "Calibration Subject");
             if (TargetPrefab != null) TargetObject = InstantiateTemporary(TargetPrefab, "Calibration Target");
             MoveToCalibrationScene(FloorFixture);
@@ -146,10 +171,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             switch (Template)
             {
                 case SpatialCalibrationTemplate.WallMounted:
-                    position = new Vector3(-back.x, 1.4f - back.y, 0.0075f - back.z);
+                    position = WallSurface.Origin + WallSurface.Normal * 0.0075f - back;
                     break;
                 case SpatialCalibrationTemplate.WallBackedFloorSupported:
-                    position = new Vector3(-back.x, -bottom.y, 0.03f - back.z);
+                    var wallAnchor = WallSurface.Origin + WallSurface.Normal * 0.03f;
+                    position = new Vector3(wallAnchor.x - back.x, -bottom.y, wallAnchor.z - back.z);
                     break;
                 case SpatialCalibrationTemplate.FloorSupported:
                     position = new Vector3(-bottom.x, -bottom.y, -bottom.z);
@@ -213,6 +239,31 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             fixture.GetComponent<Renderer>().sharedMaterial = material;
             SetFlags(fixture);
             return fixture;
+        }
+
+        private void CreateWallFixture()
+        {
+            var canonicalOrigin = new Vector3(0f, 1.4f, 0f);
+            if (SourceWallObject == null)
+            {
+                WallFixture = CreateFixture("Calibration Wall", new Vector3(6f, 4f, 0.1f),
+                    new Vector3(0f, 2f, -0.05f), new Color(0.28f, 0.3f, 0.34f));
+                WallSurface = new SpatialCalibrationSurface(
+                    canonicalOrigin, Vector3.forward, Vector3.right, Vector3.up, new Vector2(6f, 4f));
+                return;
+            }
+
+            var sourceSurface = SpatialWallSurfaceUtility.Analyze(SourceWallObject, WallNormalAxis, FlipWallNormal);
+            var alignment = SpatialWallSurfaceUtility.CanonicalAlignment(sourceSurface);
+            WallFixture = InstantiateTemporary(SourceWallObject, $"Selected Wall - {SourceWallObject.name}");
+            WallFixture.transform.localScale = SourceWallObject.transform.lossyScale;
+            foreach (var behaviour in WallFixture.GetComponentsInChildren<MonoBehaviour>(true))
+                behaviour.enabled = false;
+            WallFixture.transform.SetPositionAndRotation(
+                canonicalOrigin + alignment * (SourceWallObject.transform.position - sourceSurface.Origin),
+                alignment * SourceWallObject.transform.rotation);
+            WallSurface = new SpatialCalibrationSurface(
+                canonicalOrigin, Vector3.forward, Vector3.right, Vector3.up, sourceSurface.Size);
         }
 
         private static void SetFlags(GameObject root)

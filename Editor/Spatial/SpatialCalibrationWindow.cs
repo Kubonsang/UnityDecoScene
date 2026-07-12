@@ -11,6 +11,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
     {
         [SerializeField] private DecorAssetDescriptor descriptor;
         [SerializeField] private GameObject targetPrefab;
+        [SerializeField] private GameObject wallSource;
+        [SerializeField] private SpatialWallNormalAxis wallNormalAxis = SpatialWallNormalAxis.LocalForward;
+        [SerializeField] private bool flipWallNormal;
         [SerializeField] private SpatialCalibrationTemplate template = SpatialCalibrationTemplate.WallMounted;
         private int selectedProxy;
         private Vector2 scroll;
@@ -40,6 +43,25 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             EditorGUILayout.HelpBox("Arrange a canonical example with normal Unity transforms. Geometry comes from reviewed compound OBBs; the example defines contact and interaction intent. Calibration uses a temporary PreviewSceneStage and never changes the source prefab or active scene.", MessageType.Info);
             descriptor = (DecorAssetDescriptor)EditorGUILayout.ObjectField("Subject Descriptor", descriptor, typeof(DecorAssetDescriptor), false);
             template = (SpatialCalibrationTemplate)EditorGUILayout.EnumPopup("Relationship", template);
+            var usesWall = template is SpatialCalibrationTemplate.WallMounted or SpatialCalibrationTemplate.WallBackedFloorSupported;
+            using (new EditorGUI.DisabledScope(!usesWall))
+            {
+                wallSource = (GameObject)EditorGUILayout.ObjectField(
+                    "Wall Object", wallSource, typeof(GameObject), true);
+                wallNormalAxis = (SpatialWallNormalAxis)EditorGUILayout.EnumPopup("Wall Face Axis", wallNormalAxis);
+                flipWallNormal = EditorGUILayout.Toggle("Flip Inward Normal", flipWallNormal);
+                if (GUILayout.Button("Use Selected Scene Object as Wall"))
+                {
+                    wallSource = Selection.activeGameObject;
+                    status = wallSource != null
+                        ? $"Selected wall: {wallSource.name}. Confirm the purple inward-normal arrow after opening the stage."
+                        : "Select a wall GameObject in the scene first.";
+                }
+            }
+            if (usesWall && wallSource == null)
+                EditorGUILayout.HelpBox(
+                    "No wall is selected. The neutral calibration wall will be used, which may be hard to distinguish from the background.",
+                    MessageType.Warning);
             using (new EditorGUI.DisabledScope(template != SpatialCalibrationTemplate.SupportedBy))
                 targetPrefab = (GameObject)EditorGUILayout.ObjectField("Target Prefab", targetPrefab, typeof(GameObject), false);
 
@@ -49,7 +71,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 {
                     if (GUILayout.Button("Open Calibration Stage")) RunSafe(() =>
                     {
-                        SpatialCalibrationSession.Begin(descriptor, targetPrefab, template);
+                        SpatialCalibrationSession.Begin(
+                            descriptor, targetPrefab, template, wallSource, wallNormalAxis, flipWallNormal);
                         selectedProxy = 0;
                         status = "Calibration stage ready. Move the subject to the intended valid pose.";
                     });
@@ -83,11 +106,20 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 if (GUILayout.Button("Select Subject")) Selection.activeGameObject = session.SubjectObject;
                 using (new EditorGUI.DisabledScope(session.TargetObject == null))
                     if (GUILayout.Button("Select Target")) Selection.activeGameObject = session.TargetObject;
+                using (new EditorGUI.DisabledScope(session.WallFixture == null))
+                    if (GUILayout.Button("Select Wall")) Selection.activeGameObject = session.WallFixture;
                 if (GUILayout.Button("Frame All"))
                 {
                     Selection.objects = new UnityEngine.Object[] { session.SubjectObject, session.TargetObject }.Where(value => value != null).ToArray();
                     SceneView.lastActiveSceneView?.FrameSelected();
                 }
+            }
+            if (session.SourceWallObject != null)
+            {
+                EditorGUILayout.LabelField("Wall Source", session.SourceWallObject.name);
+                EditorGUILayout.LabelField(
+                    "Wall Surface",
+                    $"{session.WallSurface.Size.x:0.###} x {session.WallSurface.Size.y:0.###}m - inward {session.WallSurface.Normal}");
             }
         }
 
@@ -127,7 +159,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             {
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
-                    EditorGUILayout.LabelField($"{rule.kind} · {rule.frame_id} → {rule.target}", EditorStyles.boldLabel);
+                    EditorGUILayout.LabelField($"{rule.kind} - {rule.frame_id} -> {rule.target}", EditorStyles.boldLabel);
                     rule.minimum_gap = EditorGUILayout.FloatField("Minimum Gap (m)", rule.minimum_gap);
                     rule.maximum_gap = EditorGUILayout.FloatField("Maximum Gap (m)", rule.maximum_gap);
                     rule.maximum_penetration = EditorGUILayout.FloatField("Maximum Penetration", rule.maximum_penetration);
@@ -161,10 +193,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var report = session.LastReport;
             if (report != null)
             {
-                EditorGUILayout.HelpBox(report.Passed ? "Technical errors: 0 · Awaiting actual user review" : $"Technical errors: {report.error_count}", report.Passed ? MessageType.Info : MessageType.Error);
+                EditorGUILayout.HelpBox(report.Passed ? "Technical errors: 0 - Awaiting actual user review" : $"Technical errors: {report.error_count}", report.Passed ? MessageType.Info : MessageType.Error);
                 foreach (var error in report.errors) EditorGUILayout.HelpBox(error, MessageType.Error);
                 foreach (var evidence in report.contacts)
-                    EditorGUILayout.LabelField($"{evidence.rule_id}: gap {evidence.gap:0.####}m · penetration {evidence.penetration:0.####}m · support {evidence.support:P0} · direction {evidence.direction_alignment:0.###}");
+                    EditorGUILayout.LabelField($"{evidence.rule_id}: gap {evidence.gap:0.####}m - penetration {evidence.penetration:0.####}m - support {evidence.support:P0} - direction {evidence.direction_alignment:0.###}");
             }
             if (session.CaptureSet != null)
             {
@@ -211,6 +243,30 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
             DrawFrame(transform, session.Frame("bottom"), Color.green);
             DrawFrame(transform, session.Frame("back"), new Color(1f, 0.55f, 0.1f));
+            if (session.Template is SpatialCalibrationTemplate.WallMounted or SpatialCalibrationTemplate.WallBackedFloorSupported)
+                DrawWallSurface(session.WallSurface);
+        }
+
+        private static void DrawWallSurface(SpatialCalibrationSurface surface)
+        {
+            var x = surface.Tangent * surface.Size.x * 0.5f;
+            var y = surface.Bitangent * surface.Size.y * 0.5f;
+            var corners = new[]
+            {
+                surface.Origin - x - y,
+                surface.Origin + x - y,
+                surface.Origin + x + y,
+                surface.Origin - x + y,
+                surface.Origin - x - y
+            };
+            Handles.color = new Color(0.7f, 0.25f, 1f, 1f);
+            Handles.DrawAAPolyLine(3f, corners);
+            Handles.ArrowHandleCap(
+                0,
+                surface.Origin,
+                Quaternion.LookRotation(surface.Normal),
+                Mathf.Clamp(Mathf.Min(surface.Size.x, surface.Size.y) * 0.2f, 0.2f, 0.8f),
+                EventType.Repaint);
         }
 
         private static void DrawFrame(Transform transform, ContactFrame frame, Color color)

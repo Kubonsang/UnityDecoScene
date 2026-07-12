@@ -98,6 +98,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private static void DrawEvidence(Texture2D texture, Camera camera, SpatialCalibrationSession session, SpatialCalibrationReport report)
         {
             var subject = session.SubjectObject.transform;
+            if (session.Template is SpatialCalibrationTemplate.WallMounted or SpatialCalibrationTemplate.WallBackedFloorSupported)
+                DrawSurfaceEvidence(texture, camera, session.WallSurface);
             var boxColor = new Color(0.15f, 1f, 0.35f);
             foreach (var proxy in session.Geometry.collisionProxies)
             {
@@ -122,6 +124,31 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 var normal = subject.TransformDirection(session.Frame(rule.frame_id).localNormal).normalized;
                 DrawWorldArrow(texture, camera, point, point + normal * 0.32f, new Color(0.2f, 0.65f, 1f));
             }
+        }
+
+        private static void DrawSurfaceEvidence(
+            Texture2D texture,
+            Camera camera,
+            SpatialCalibrationSurface surface)
+        {
+            var horizontal = surface.Tangent * surface.Size.x * 0.5f;
+            var vertical = surface.Bitangent * surface.Size.y * 0.5f;
+            var corners = new[]
+            {
+                surface.Origin - horizontal - vertical,
+                surface.Origin + horizontal - vertical,
+                surface.Origin + horizontal + vertical,
+                surface.Origin - horizontal + vertical
+            };
+            var color = new Color(0.72f, 0.28f, 1f);
+            for (var index = 0; index < corners.Length; index++)
+                DrawWorldLine(texture, camera, corners[index], corners[(index + 1) % corners.Length], color, 2);
+            DrawWorldArrow(
+                texture,
+                camera,
+                surface.Origin,
+                surface.Origin + surface.Normal * Mathf.Clamp(Mathf.Min(surface.Size.x, surface.Size.y) * 0.2f, 0.2f, 0.8f),
+                color);
         }
 
         private static Vector3[] BoxCorners(Vector3 center, Quaternion rotation, Vector3 size)
