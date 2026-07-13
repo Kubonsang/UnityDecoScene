@@ -88,13 +88,17 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
-        public void ReviewTemplateRequiresAllChecksBeforeSingleBatchApprovalCommand()
+        public void ReviewTemplateSeparatesViewChecksFromExplicitDecisionAndBatchSave()
         {
             var template = System.IO.File.ReadAllText(
                 "Packages/com.unitydecoscene.dungeon-decorator/Editor/Spatial/Templates/CalibrationReviewTemplate.html");
             Assert.That(template, Does.Contain("data-reviewed"));
-            Assert.That(template, Does.Contain("checked.size!==approvableGroups.length"));
-            Assert.That(template, Does.Contain("approvableGroups.flatMap(group=>group.items.map"));
+            Assert.That(template, Does.Contain("체크만으로 승인되지 않습니다"));
+            Assert.That(template, Does.Contain("승인 예정"));
+            Assert.That(template, Does.Contain("수정 필요"));
+            Assert.That(template, Does.Contain("미판정"));
+            Assert.That(template, Does.Contain("decisions.get(value.id)!=='Approved'"));
+            Assert.That(template, Does.Contain("awaitingGroups.flatMap(group=>group.items.map"));
             Assert.That(template, Does.Contain("동일 공간 모델"));
             Assert.That(template, Does.Contain("/api/spatial/workflow/review-batch"));
         }

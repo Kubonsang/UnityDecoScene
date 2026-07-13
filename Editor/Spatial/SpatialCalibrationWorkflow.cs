@@ -428,9 +428,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static void GenerateArtifacts(SpatialCalibrationWorkflowState state)
         {
-            var templateAsset = AssetDatabase.LoadAssetAtPath<TextAsset>(ReviewTemplatePath);
-            if (templateAsset == null) throw new FileNotFoundException("Calibration review template was not found.", ReviewTemplatePath);
-            AtomicWrite(ReviewPath, RenderReviewHtml(state, templateAsset.text));
+            if (!File.Exists(ReviewTemplatePath))
+                throw new FileNotFoundException("Calibration review template was not found.", ReviewTemplatePath);
+            AtomicWrite(ReviewPath, RenderReviewHtml(state, File.ReadAllText(ReviewTemplatePath)));
             AtomicWrite(AgentBriefPath, JsonUtility.ToJson(BuildAgentBrief(state), true) + Environment.NewLine);
         }
 
