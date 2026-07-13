@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using UnityDecoScene.DungeonDecorator.Editor;
@@ -92,7 +93,9 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             var template = System.IO.File.ReadAllText(
                 "Packages/com.unitydecoscene.dungeon-decorator/Editor/Spatial/Templates/CalibrationReviewTemplate.html");
             Assert.That(template, Does.Contain("data-reviewed"));
-            Assert.That(template, Does.Contain("checked.size!==approvable.length"));
+            Assert.That(template, Does.Contain("checked.size!==approvableGroups.length"));
+            Assert.That(template, Does.Contain("approvableGroups.flatMap(group=>group.items.map"));
+            Assert.That(template, Does.Contain("동일 공간 모델"));
             Assert.That(template, Does.Contain("/api/spatial/workflow/review-batch"));
         }
 
@@ -111,6 +114,63 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         {
             Assert.Throws<System.IO.InvalidDataException>(() =>
                 SpatialCalibrationCatalogSeed.ParseTemplate("ProbablyOnAWall"));
+        }
+
+        [Test]
+        public void GeometryFamilyHashUsesSpatialEnvelopeInsteadOfRenderMaterial()
+        {
+            var first = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var second = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var firstMaterial = new Material(Shader.Find("Standard"));
+            var secondMaterial = new Material(Shader.Find("Standard"));
+            try
+            {
+                first.GetComponent<Renderer>().sharedMaterial = firstMaterial;
+                second.GetComponent<Renderer>().sharedMaterial = secondMaterial;
+                firstMaterial.color = Color.red;
+                secondMaterial.color = Color.blue;
+                Assert.That(SpatialGeometryFamilyHasher.Compute(first),
+                    Is.EqualTo(SpatialGeometryFamilyHasher.Compute(second)));
+                second.transform.localScale = new Vector3(2f, 1f, 1f);
+                Assert.That(SpatialGeometryFamilyHasher.Compute(first),
+                    Is.Not.EqualTo(SpatialGeometryFamilyHasher.Compute(second)));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(firstMaterial);
+                UnityEngine.Object.DestroyImmediate(secondMaterial);
+                UnityEngine.Object.DestroyImmediate(first);
+                UnityEngine.Object.DestroyImmediate(second);
+            }
+        }
+
+        [Test]
+        public void NextBatchLimitCountsGeometryFamiliesAndKeepsTheirVariantsTogether()
+        {
+            var items = new List<SpatialCalibrationWorkflowItem>
+            {
+                new() { id = "banner-red", geometryFamilyHash = "banner", template = "WallMounted", status = SpatialCalibrationWorkflowStates.Pending },
+                new() { id = "banner-blue", geometryFamilyHash = "banner", template = "WallMounted", status = SpatialCalibrationWorkflowStates.Pending },
+                new() { id = "chair", geometryFamilyHash = "chair", template = "FloorSupported", status = SpatialCalibrationWorkflowStates.Pending }
+            };
+
+            var selected = SpatialCalibrationWorkflow.SelectBatchCandidates(items, 1);
+
+            Assert.That(selected.Select(item => item.id), Is.EqualTo(new[] { "banner-red", "banner-blue" }));
+        }
+
+        [Test]
+        public void SameEnvelopeWithDifferentRelationshipStaysInSeparateBatchFamily()
+        {
+            var items = new List<SpatialCalibrationWorkflowItem>
+            {
+                new() { id = "wall", geometryFamilyHash = "box", template = "WallMounted", status = SpatialCalibrationWorkflowStates.Pending },
+                new() { id = "floor", geometryFamilyHash = "box", template = "FloorSupported", status = SpatialCalibrationWorkflowStates.Pending }
+            };
+
+            var selected = SpatialCalibrationWorkflow.SelectBatchCandidates(items, 1);
+
+            Assert.That(selected.Select(item => item.id), Is.EqualTo(new[] { "wall" }));
         }
     }
 }

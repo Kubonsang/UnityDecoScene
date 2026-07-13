@@ -101,8 +101,16 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 item.displayName = descriptor.Prefab.name;
                 item.assetId = descriptor.AssetId;
                 item.descriptorPath = descriptorPath;
+                item.geometryFamilyHash = SpatialGeometryFamilyHasher.Compute(descriptor.Prefab, descriptor.Geometry);
                 if (string.IsNullOrWhiteSpace(item.template)) ResolveRelation(item, descriptor);
                 next.Add(item);
+            }
+            foreach (var family in next.Where(item => !string.IsNullOrWhiteSpace(item.geometryFamilyHash))
+                         .GroupBy(GeometryFamilyKey, StringComparer.Ordinal))
+            {
+                var canonical = family.OrderBy(item => item.status == SpatialCalibrationWorkflowStates.Approved ? 0 : 1)
+                    .ThenBy(item => item.id, StringComparer.Ordinal).First();
+                foreach (var item in family) item.geometryFamilyCanonicalId = canonical.id;
             }
             state.items = next;
             state.status = DeriveWorkflowStatus(state);
@@ -154,13 +162,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             {
                 state = ScanOrResume();
                 var batchSize = Mathf.Clamp(requestedBatchSize ?? state.batchSize, 1, 32);
-                var candidates = state.items
-                    .Where(item => item.status is SpatialCalibrationWorkflowStates.Pending
-                        or SpatialCalibrationWorkflowStates.RevisionRequested
-                        or SpatialCalibrationWorkflowStates.Stale)
-                    .Where(item => Enum.TryParse<SpatialCalibrationTemplate>(item.template, out _))
-                    .Take(batchSize)
-                    .ToArray();
+                var candidates = SelectBatchCandidates(state.items, batchSize);
                 var needsWall = candidates.Any(item => Enum.Parse<SpatialCalibrationTemplate>(item.template) is
                     SpatialCalibrationTemplate.WallMounted or SpatialCalibrationTemplate.WallBackedFloorSupported);
                 var wall = needsWall ? FindWallCandidate(state.wallHierarchyPath) : null;
@@ -246,9 +248,33 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             nextPoll = EditorApplication.timeSinceStartup + PollInterval;
             var request = ProjectPath(RequestRelativePath);
             if (!File.Exists(request)) return;
+            var action = File.ReadAllText(request).Trim();
             File.Delete(request);
-            RunNextBatch();
+            if (string.Equals(action, "scan_only", StringComparison.OrdinalIgnoreCase)) ScanOrResume();
+            else RunNextBatch();
         }
+
+        public static SpatialCalibrationWorkflowItem[] SelectBatchCandidates(
+            IEnumerable<SpatialCalibrationWorkflowItem> items,
+            int geometryFamilyLimit)
+        {
+            if (items == null) throw new ArgumentNullException(nameof(items));
+            geometryFamilyLimit = Mathf.Clamp(geometryFamilyLimit, 1, 32);
+            return items.Select((item, index) => new { item, index })
+                .Where(entry => entry.item.status is SpatialCalibrationWorkflowStates.Pending
+                    or SpatialCalibrationWorkflowStates.RevisionRequested
+                    or SpatialCalibrationWorkflowStates.Stale)
+                .Where(entry => Enum.TryParse<SpatialCalibrationTemplate>(entry.item.template, out _))
+                .GroupBy(entry => GeometryFamilyKey(entry.item), StringComparer.Ordinal)
+                .OrderBy(group => group.Min(entry => entry.index))
+                .Take(geometryFamilyLimit)
+                .SelectMany(group => group.OrderBy(entry => entry.index).Select(entry => entry.item))
+                .ToArray();
+        }
+
+        private static string GeometryFamilyKey(SpatialCalibrationWorkflowItem item) => string.Join("|",
+            string.IsNullOrWhiteSpace(item.geometryFamilyHash) ? $"single:{item.id}" : item.geometryFamilyHash,
+            item.template ?? string.Empty);
 
         private static SpatialCalibrationWorkflowState NewState()
         {

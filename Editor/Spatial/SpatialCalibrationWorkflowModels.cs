@@ -42,6 +42,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string descriptorGuid;
         public string descriptorPath;
         public string dependencyHash;
+        public string geometryFamilyHash;
+        public string geometryFamilyCanonicalId;
         public string template;
         public string relationSource;
         public string suggestedTemplate;
