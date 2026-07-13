@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace UnityDecoScene.DungeonDecorator.Editor
@@ -36,6 +37,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
     public static class SpatialWallSurfaceUtility
     {
+        private const float PlanarNormalAlignment = 0.98f;
+        private const float PlaneDepthBucket = 0.01f;
+
         public static SpatialCalibrationSurface Analyze(
             GameObject wall,
             SpatialWallNormalAxis normalAxis,
@@ -62,6 +66,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var tangent = Vector3.Cross(bitangent, normal).normalized;
             var points = WorldGeometryPoints(wall);
             ProjectedRange(points, normal, out _, out var maximumNormal);
+            if (TryDominantPlanarDepth(wall, normal, out var dominantNormal))
+                maximumNormal = dominantNormal;
             ProjectedRange(points, tangent, out var minimumTangent, out var maximumTangent);
             ProjectedRange(points, bitangent, out var minimumBitangent, out var maximumBitangent);
             return new SpatialCalibrationSurface(
@@ -74,6 +80,62 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 new Vector2(
                     Mathf.Max(0.01f, maximumTangent - minimumTangent),
                     Mathf.Max(0.01f, maximumBitangent - minimumBitangent)));
+        }
+
+        private static bool TryDominantPlanarDepth(GameObject wall, Vector3 normal, out float depth)
+        {
+            var clusters = new Dictionary<int, PlaneCluster>();
+            foreach (var filter in wall.GetComponentsInChildren<MeshFilter>(true))
+            {
+                var mesh = filter.sharedMesh;
+                if (mesh == null) continue;
+                try
+                {
+                    var vertices = mesh.vertices;
+                    var triangles = mesh.triangles;
+                    var matrix = filter.transform.localToWorldMatrix;
+                    for (var index = 0; index + 2 < triangles.Length; index += 3)
+                    {
+                        var first = matrix.MultiplyPoint3x4(vertices[triangles[index]]);
+                        var second = matrix.MultiplyPoint3x4(vertices[triangles[index + 1]]);
+                        var third = matrix.MultiplyPoint3x4(vertices[triangles[index + 2]]);
+                        var cross = Vector3.Cross(second - first, third - first);
+                        var doubleArea = cross.magnitude;
+                        if (doubleArea < 0.000001f) continue;
+                        if (Vector3.Dot(cross / doubleArea, normal) < PlanarNormalAlignment) continue;
+
+                        var triangleDepth = Vector3.Dot((first + second + third) / 3f, normal);
+                        var key = Mathf.RoundToInt(triangleDepth / PlaneDepthBucket);
+                        clusters.TryGetValue(key, out var cluster);
+                        cluster.area += doubleArea * 0.5f;
+                        cluster.weightedDepth += triangleDepth * doubleArea * 0.5f;
+                        clusters[key] = cluster;
+                    }
+                }
+                catch (UnityException)
+                {
+                    // Some imported meshes are not CPU-readable. Bounds remain the deterministic fallback.
+                }
+            }
+
+            if (clusters.Count == 0)
+            {
+                depth = 0f;
+                return false;
+            }
+
+            var best = clusters.Values
+                .OrderByDescending(cluster => cluster.area)
+                .ThenByDescending(cluster => cluster.weightedDepth / cluster.area)
+                .First();
+            depth = best.weightedDepth / best.area;
+            return true;
+        }
+
+        private struct PlaneCluster
+        {
+            public float area;
+            public float weightedDepth;
         }
 
         public static Quaternion CanonicalAlignment(SpatialCalibrationSurface source)

@@ -77,6 +77,32 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void AnalyzeUsesLargestPlanarFaceInsteadOfFurthestDecoration()
+        {
+            var wall = new GameObject("Wall Root");
+            var broadFace = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var protrudingDecoration = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            broadFace.transform.SetParent(wall.transform, false);
+            broadFace.transform.localScale = new Vector3(4f, 3f, 0.2f);
+            protrudingDecoration.transform.SetParent(wall.transform, false);
+            protrudingDecoration.transform.localPosition = new Vector3(0f, 0f, 0.35f);
+            protrudingDecoration.transform.localScale = Vector3.one * 0.5f;
+            try
+            {
+                var surface = SpatialWallSurfaceUtility.Analyze(
+                    wall, SpatialWallNormalAxis.LocalForward, false);
+
+                Assert.That(surface.Origin.z, Is.EqualTo(0.1f).Within(0.0001f));
+                Assert.That(surface.Size.x, Is.EqualTo(4f).Within(0.0001f));
+                Assert.That(surface.Size.y, Is.EqualTo(3f).Within(0.0001f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(wall);
+            }
+        }
+
+        [Test]
         public void WallMountedSessionClonesSelectedWallAndLeavesSourceUnchanged()
         {
             var subject = GameObject.CreatePrimitive(PrimitiveType.Cube);
