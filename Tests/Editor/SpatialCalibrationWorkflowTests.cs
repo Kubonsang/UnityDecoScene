@@ -85,5 +85,22 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             Assert.That(value, Is.Not.Null);
             if (!string.IsNullOrWhiteSpace(value)) Assert.That(System.IO.File.Exists(value), Is.True);
         }
+
+        [TestCase("FloorSupported", SpatialCalibrationTemplate.FloorSupported)]
+        [TestCase("wallbackedfloorsupported", SpatialCalibrationTemplate.WallBackedFloorSupported)]
+        [TestCase("WallMounted", SpatialCalibrationTemplate.WallMounted)]
+        public void CatalogSeedParsesOnlyExplicitRelationshipTemplates(
+            string value,
+            SpatialCalibrationTemplate expected)
+        {
+            Assert.That(SpatialCalibrationCatalogSeed.ParseTemplate(value), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void CatalogSeedRejectsUnknownRelationshipTemplate()
+        {
+            Assert.Throws<System.IO.InvalidDataException>(() =>
+                SpatialCalibrationCatalogSeed.ParseTemplate("ProbablyOnAWall"));
+        }
     }
 }

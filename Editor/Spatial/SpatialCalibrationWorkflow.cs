@@ -80,6 +80,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public static SpatialCalibrationWorkflowState ScanOrResume()
         {
+            SpatialCalibrationCatalogSeed.ImportIfPresent();
             var state = LoadState() ?? NewState();
             var previous = state.items.ToDictionary(item => item.descriptorGuid, StringComparer.OrdinalIgnoreCase);
             var next = new List<SpatialCalibrationWorkflowItem>();
