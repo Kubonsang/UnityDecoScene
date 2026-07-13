@@ -108,6 +108,11 @@ const server = http.createServer(async (request, response) => {
       const body = await readJson(request);
       return send(response, 200, await reviewWorkflowItem(body));
     }
+    if (request.method === "POST" && requestUrl.pathname === "/api/spatial/workflow/review-batch") {
+      requireNonce(request);
+      const body = await readJson(request);
+      return send(response, 200, await reviewWorkflowBatch(body));
+    }
     return send(response, 404, { error: "Not found." });
   } catch (error) {
     return send(response, 400, { error: error.message });
@@ -173,6 +178,36 @@ async function reviewWorkflowItem(body) {
   state.status = deriveWorkflowStatus(state);
   atomicJson(workflowStatePath, state);
   return { status: result.status, id: item.id, captureHash: item.captureHash };
+}
+
+async function reviewWorkflowBatch(body) {
+  if (body.decision !== "Approved") throw new Error("Batch review currently supports approval only.");
+  const requested = Array.isArray(body.items) ? body.items : [];
+  if (!requested.length) throw new Error("At least one workflow item is required.");
+  const state = loadWorkflow();
+  const awaiting = (state.items || []).filter(item => item.status === "AwaitingHumanReview");
+  if (requested.length !== awaiting.length) throw new Error("Every awaiting item must be checked before batch approval.");
+  const ids = new Set(requested.map(item => String(item.id || "")));
+  if (ids.size !== requested.length || awaiting.some(item => !ids.has(item.id))) {
+    throw new Error("Batch approval selection does not match the current review queue.");
+  }
+  for (const requestItem of requested) {
+    const item = awaiting.find(value => value.id === String(requestItem.id || ""));
+    if (!item || item.captureHash !== String(requestItem.captureHash || "")) throw new Error("Capture hash is stale.");
+  }
+
+  const results = [];
+  for (const requestItem of requested) {
+    results.push(await reviewWorkflowItem({
+      id: requestItem.id,
+      captureHash: requestItem.captureHash,
+      decision: "Approved",
+      reviewer: body.reviewer,
+      issues: [],
+      comment: body.comment || "Batch-approved after individual visual checks.",
+    }));
+  }
+  return { status: "Approved", count: results.length, results };
 }
 
 function loadWorkflow() {

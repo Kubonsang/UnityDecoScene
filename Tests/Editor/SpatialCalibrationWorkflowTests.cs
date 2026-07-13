@@ -86,6 +86,16 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             if (!string.IsNullOrWhiteSpace(value)) Assert.That(System.IO.File.Exists(value), Is.True);
         }
 
+        [Test]
+        public void ReviewTemplateRequiresAllChecksBeforeSingleBatchApprovalCommand()
+        {
+            var template = System.IO.File.ReadAllText(
+                "Packages/com.unitydecoscene.dungeon-decorator/Editor/Spatial/Templates/CalibrationReviewTemplate.html");
+            Assert.That(template, Does.Contain("data-reviewed"));
+            Assert.That(template, Does.Contain("checked.size!==approvable.length"));
+            Assert.That(template, Does.Contain("/api/spatial/workflow/review-batch"));
+        }
+
         [TestCase("FloorSupported", SpatialCalibrationTemplate.FloorSupported)]
         [TestCase("wallbackedfloorsupported", SpatialCalibrationTemplate.WallBackedFloorSupported)]
         [TestCase("WallMounted", SpatialCalibrationTemplate.WallMounted)]
