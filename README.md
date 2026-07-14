@@ -2,6 +2,18 @@
 
 Unity 6 editor package for dressing one existing room at a time from a concept brief and a curated set of prefabs. It deliberately does not generate mazes, rooms, navigation, or meshes.
 
+> **Project status:** `0.3.0` preview for Unity 6 on Windows. The repository root is a Unity Package Manager package, not a standalone Unity project.
+
+## Install
+
+In Unity, open **Window > Package Management > Package Manager**, choose **Add package from git URL**, and enter:
+
+```text
+https://github.com/Kubonsang/UnityDecoScene.git
+```
+
+After Unity imports the package, open **Window > Concept Room Decorator > Spatial Calibration** to review asset geometry, or **Window > Concept Room Decorator** for the room workflow. Source prefabs and materials are never modified by calibration or preview operations.
+
 ## Core workflow
 
 1. Add `ConceptRoom` to an existing room root and assign a `BoxCollider` as its authoring bounds.
@@ -20,6 +32,10 @@ The package includes a dependency-free Node MCP bridge under `Tools~/McpBridge/s
 Unity must be open for room MCP tools to operate. If `unity-ctx` is installed or `UNITY_CTX_BIN` points to its executable, the bridge also exposes its read-only context, Spatial Manifest v2 check, and wall-suggestion tools. The room workflow remains available when that optional child process is disconnected. MCP can create and refine preview state, but it cannot apply changes to the scene.
 
 Spatial Calibration adds proposal-only tools for inspection, four-view capture, draft reading, deterministic validation, and temporary AI proposals. MCP has no pass, approval, tracked-file write, or Apply tool.
+
+## Development verification
+
+Package-scoped EditMode regression tests use `testplay-runner v0.11.0` through the open Unity Editor. The compact wrapper and expected agent-safe output are documented in [Tools~/TestPlay/README.md](Tools~/TestPlay/README.md). The current baseline is 49 passing Decorator tests on Unity `6000.3.10f1` for Windows.
 
 ## Human-reviewed Spatial Contracts
 
