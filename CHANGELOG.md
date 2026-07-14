@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Added host-project room-authoring adapters and source-bound authoring contexts without taking a dependency on host project code.
+- Added reviewed fixed-room geometry and compound OBB obstacle checks for walls, adjacent wall segments, and corner structures.
+- Preserved supporting-prop relation anchors while projecting candidates onto their intended contact surfaces.
+- Isolated room captures to the preview scene so unrelated objects from other open scenes cannot appear in review evidence.
+- Added hash-verified synchronization of approved Spatial Contracts into Decor Asset geometry without accepting stale dependency or contract data.
+
 ## 0.3.0
 
 - Added human-reviewed asset and interaction Spatial Contracts with hash-bound approval states.

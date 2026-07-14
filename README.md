@@ -2,7 +2,7 @@
 
 Unity 6 editor package for dressing one existing room at a time from a concept brief and a curated set of prefabs. It deliberately does not generate mazes, rooms, navigation, or meshes.
 
-> **Project status:** `0.3.0` preview for Unity 6 on Windows. The repository root is a Unity Package Manager package, not a standalone Unity project.
+> **Project status:** `0.4.0` preview for Unity 6 on Windows. The repository root is a Unity Package Manager package, not a standalone Unity project.
 
 ## Install
 
@@ -22,8 +22,10 @@ After Unity imports the package, open **Window > Concept Room Decorator > Spatia
 4. Open **Window > Concept Room Decorator**.
 5. Scan room surfaces and prefab geometry. Approve inward surface normals, compound OBB proxies, semantic axes, and bottom/back contact faces.
 6. Compose a plan and generate a non-persistent preview. Unreviewed or incomplete geometry becomes an Asset Gap instead of an AABB guess.
-7. Validate and capture the preview, then submit mood, style, story, and composition scores against the concept references.
-8. Apply only after every visual threshold passes; the complete apply operation is one Unity Undo group.
+7. Validate and capture the preview. Deterministic technical errors must be cleared before a person can approve the latest evidence set.
+8. Apply only when the source and geometry are still current and the latest capture hash has explicit human approval; the complete apply operation is one Unity Undo group.
+
+Host projects can provide an Editor-only `IRoomAuthoringAdapter` to build a `RoomAuthoringContext` from their own room source of truth. The context supplies reviewed surfaces, fixed wall and corner geometry, stable source hashes, and optional cell/side metadata. Floor surfaces remain support targets rather than solid obstacles, while adjacent walls and pillars participate in compound OBB collision checks. Existing integrations can continue to use the original preview API.
 
 ## MCP
 
@@ -35,7 +37,7 @@ Spatial Calibration adds proposal-only tools for inspection, four-view capture, 
 
 ## Development verification
 
-Package-scoped EditMode regression tests use `testplay-runner v0.11.0` through the open Unity Editor. The compact wrapper and expected agent-safe output are documented in [Tools~/TestPlay/README.md](Tools~/TestPlay/README.md). The current baseline is 49 passing Decorator tests on Unity `6000.3.10f1` for Windows.
+Package-scoped EditMode regression tests use `testplay-runner v0.11.0` through the open Unity Editor. The compact wrapper and expected agent-safe output are documented in [Tools~/TestPlay/README.md](Tools~/TestPlay/README.md). The 0.4.0 verification environment is Unity `6000.3.8f1` for Windows.
 
 ## Human-reviewed Spatial Contracts
 
@@ -55,7 +57,7 @@ The optional loopback human-authority service lives at `Tools~/SpatialReviewBrid
 
 Collider geometry is preferred. Prefabs without colliders receive one local OBB proxy per Renderer bound. A dependency hash prevents unchanged reviewed assets from being reanalysed; changed source assets return to an unreviewed state. Final collision decisions use compound OBB SAT, while AABB is only a broad-phase filter.
 
-Default physical contracts are 0.5–1 cm for wall-mounted props, 1–5 cm for wall-backed furniture, and 0–1 cm with at least 60% support for floor-supported props. Curved, sloped, or non-planar room surfaces are reported as `UNSUPPORTED_SURFACE`.
+Default physical contracts allow a 0.5–1 cm gap for wall-mounted props, a 1–5 cm gap for wall-backed furniture, and a 0–1 cm floor gap with at least 60% support for floor-supported props. Penetration is not allowed. Curved, sloped, or non-planar room surfaces are reported as `UNSUPPORTED_SURFACE`.
 
 ## Supported scope
 
