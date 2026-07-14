@@ -11,6 +11,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public static LayoutResult Generate(RoomCompositionPlan plan, IReadOnlyList<PlacedDecorItem> lockedPlacements = null)
         {
+            return Generate(new LayoutRequest(plan, lockedPlacements));
+        }
+
+        public static LayoutResult Generate(LayoutRequest request)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            var plan = request.Plan;
+            var lockedPlacements = request.LockedPlacements;
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             if (plan.Room == null || plan.Room.AuthoringBounds == null) throw new InvalidOperationException("The composition plan needs a room with authoring bounds.");
             if (plan.Catalog == null) throw new InvalidOperationException("The composition plan needs a decor catalog.");
@@ -68,7 +76,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     if (result.Placements.Any(item => item.elementId == element.elementId && item.instanceIndex == instanceIndex && item.locked))
                         continue;
 
-                    var placed = TryPlace(plan, element, descriptor, instanceIndex, random, result.Placements);
+                    var placed = TryPlace(plan, request.AuthoringContext, element, descriptor, instanceIndex, random, result.Placements);
                     if (placed != null) result.Placements.Add(placed);
                     else AddGap(result, element, activeStyleSet, "No collision-free candidate satisfied the room and composition constraints.", 0, 1);
                 }
@@ -77,13 +85,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return result;
         }
 
-        private static PlacedDecorItem TryPlace(RoomCompositionPlan plan, CompositionElement element, DecorAssetDescriptor descriptor, int instanceIndex, System.Random random, IReadOnlyList<PlacedDecorItem> placed)
+        private static PlacedDecorItem TryPlace(RoomCompositionPlan plan, RoomAuthoringContext authoringContext, CompositionElement element, DecorAssetDescriptor descriptor, int instanceIndex, System.Random random, IReadOnlyList<PlacedDecorItem> placed)
         {
             Candidate? best = null;
             for (var attempt = 0; attempt < CandidateAttempts; attempt++)
             {
-                if (!TryCreateCandidate(plan.Room, element, descriptor, instanceIndex, attempt, random, placed, out var candidate)) continue;
-                if (!IsCandidateValid(plan.Room, descriptor, element, candidate, placed)) continue;
+                if (!TryCreateCandidate(plan.Room, authoringContext, element, descriptor, instanceIndex, attempt, random, placed, out var candidate)) continue;
+                if (!IsCandidateValid(plan.Room, authoringContext, descriptor, element, candidate, placed)) continue;
 
                 candidate.Score = ScoreCandidate(plan.Room, element, candidate, placed);
                 if (!best.HasValue || candidate.Score > best.Value.Score) best = candidate;
@@ -111,7 +119,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             };
         }
 
-        private static bool TryCreateCandidate(ConceptRoom room, CompositionElement element, DecorAssetDescriptor descriptor, int instanceIndex, int attempt, System.Random random, IReadOnlyList<PlacedDecorItem> placed, out Candidate candidate)
+        private static bool TryCreateCandidate(ConceptRoom room, RoomAuthoringContext authoringContext, CompositionElement element, DecorAssetDescriptor descriptor, int instanceIndex, int attempt, System.Random random, IReadOnlyList<PlacedDecorItem> placed, out Candidate candidate)
         {
             candidate = default;
             var box = room.AuthoringBounds;
@@ -123,7 +131,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var worldPoint = box.transform.TransformPoint(localPoint);
 
             var anchor = FindAnchor(element, placed);
-            if (anchor != null && element.relation is CompositionRelation.Surrounds or CompositionRelation.Supports or CompositionRelation.ScatteredNear or CompositionRelation.Faces)
+            var usesRelationAnchor = anchor != null && element.relation is CompositionRelation.Surrounds or CompositionRelation.Supports or CompositionRelation.ScatteredNear or CompositionRelation.Faces;
+            if (usesRelationAnchor)
             {
                 var angle = (instanceIndex * 137.5f + attempt * 47f + (float)random.NextDouble() * 30f) * Mathf.Deg2Rad;
                 var distance = Mathf.Max(0.2f, element.spacing) * Mathf.Lerp(0.75f, 1.25f, (float)random.NextDouble());
@@ -147,7 +156,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             {
                 var primary = rules[0];
                 var surfaceType = SurfaceTypeFor(primary.requirement);
-                var surfaces = ReviewedSurfaces(room, surfaceType, element.preferredSurfaceId);
+                var surfaces = ReviewedSurfaces(room, authoringContext, surfaceType, element.preferredSurfaceId);
                 if (surfaces.Length == 0) return false;
                 var targetSurface = surfaces[(attempt + instanceIndex) % surfaces.Length];
                 var frame = profile.FrameFor(primary);
@@ -156,8 +165,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 var edgePadding = Mathf.Max(0.25f, descriptor.Clearance);
                 var halfWidth = Mathf.Max(0f, targetSurface.Size.x * 0.5f - frame.size.x * scalar * 0.5f - edgePadding);
                 var halfHeight = Mathf.Max(0f, targetSurface.Size.y * 0.5f - frame.size.y * scalar * 0.5f - edgePadding);
-                var horizontal = Mathf.Lerp(-halfWidth, halfWidth, (float)random.NextDouble());
-                var vertical = Mathf.Lerp(-halfHeight, halfHeight, (float)random.NextDouble());
+                var horizontal = usesRelationAnchor
+                    ? Mathf.Clamp(Vector3.Dot(worldPoint - targetSurface.Origin, targetSurface.Tangent), -halfWidth, halfWidth)
+                    : Mathf.Lerp(-halfWidth, halfWidth, (float)random.NextDouble());
+                var vertical = usesRelationAnchor
+                    ? Mathf.Clamp(Vector3.Dot(worldPoint - targetSurface.Origin, targetSurface.Bitangent), -halfHeight, halfHeight)
+                    : Mathf.Lerp(-halfHeight, halfHeight, (float)random.NextDouble());
                 var surfacePoint = targetSurface.Point(horizontal, vertical);
                 var targetGap = TargetGap(primary);
                 worldPoint = SpatialGeometryUtility.PlaceContactAtSurface(profile, frame, targetSurface, surfacePoint, rotation, scale, targetGap);
@@ -166,7 +179,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 for (var ruleIndex = 1; ruleIndex < rules.Length; ruleIndex++)
                 {
                     var secondary = rules[ruleIndex];
-                    if (!TryAttachSecondary(room, descriptor, secondary, rotation, scale, targetSurfaces, ref worldPoint, out var secondarySurface)) return false;
+                    if (!TryAttachSecondary(room, authoringContext, descriptor, secondary, rotation, scale, targetSurfaces, ref worldPoint, out var secondarySurface)) return false;
                     targetSurfaces.Add(secondarySurface);
                 }
 
@@ -184,11 +197,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return true;
         }
 
-        private static bool TryAttachSecondary(ConceptRoom room, DecorAssetDescriptor descriptor, ContactRules rules, Quaternion rotation, Vector3 scale, IReadOnlyList<RoomSurface> existingSurfaces, ref Vector3 position, out RoomSurface targetSurface)
+        private static bool TryAttachSecondary(ConceptRoom room, RoomAuthoringContext authoringContext, DecorAssetDescriptor descriptor, ContactRules rules, Quaternion rotation, Vector3 scale, IReadOnlyList<RoomSurface> existingSurfaces, ref Vector3 position, out RoomSurface targetSurface)
         {
             targetSurface = null;
             var frame = descriptor.Geometry.FrameFor(rules);
-            foreach (var candidateSurface in ReviewedSurfaces(room, SurfaceTypeFor(rules.requirement)))
+            foreach (var candidateSurface in ReviewedSurfaces(room, authoringContext, SurfaceTypeFor(rules.requirement)))
             {
                 var contactPoint = position + rotation * Vector3.Scale(frame.localPoint, scale);
                 var signedDistance = Vector3.Dot(contactPoint - candidateSurface.Origin, candidateSurface.Normal);
@@ -217,9 +230,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return false;
         }
 
-        private static RoomSurface[] ReviewedSurfaces(ConceptRoom room, RoomSurfaceType type, string preferredSurfaceId = null)
+        private static RoomSurface[] ReviewedSurfaces(ConceptRoom room, RoomAuthoringContext authoringContext, RoomSurfaceType type, string preferredSurfaceId = null)
         {
-            var surfaces = room.GetReviewedSurfaces(type).OrderBy(value => value.SurfaceId, StringComparer.Ordinal).ToArray();
+            var contextSurfaces = authoringContext?.surfaces?.Where(value => value != null).ToArray();
+            var surfaces = contextSurfaces != null && contextSurfaces.Length > 0
+                ? contextSurfaces.Where(value => value.Reviewed && value.Supported && value.SurfaceType == type)
+                    .OrderBy(value => value.SurfaceId, StringComparer.Ordinal).ToArray()
+                : room.GetReviewedSurfaces(type).OrderBy(value => value.SurfaceId, StringComparer.Ordinal).ToArray();
             if (string.IsNullOrWhiteSpace(preferredSurfaceId)) return surfaces;
             return surfaces.Where(value => string.Equals(value.SurfaceId, preferredSurfaceId, StringComparison.Ordinal)).ToArray();
         }
@@ -297,7 +314,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return Quaternion.LookRotation(box.transform.TransformDirection(localInward), box.transform.up);
         }
 
-        private static bool IsCandidateValid(ConceptRoom room, DecorAssetDescriptor descriptor, CompositionElement element, Candidate candidate, IReadOnlyList<PlacedDecorItem> placed)
+        private static bool IsCandidateValid(ConceptRoom room, RoomAuthoringContext authoringContext, DecorAssetDescriptor descriptor, CompositionElement element, Candidate candidate, IReadOnlyList<PlacedDecorItem> placed)
         {
             if (!room.ContainsBounds(candidate.Bounds, candidate.Surface != null)) return false;
 
@@ -317,6 +334,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 if (existing.descriptor != null && existing.descriptor.ForbiddenAssetIds.Contains(descriptor.AssetId)) return false;
             }
 
+            if (IntersectsRoomGeometry(authoringContext, descriptor, candidate)) return false;
+
             if (element.relation == CompositionRelation.Avoids)
             {
                 var anchor = FindAnchor(element, placed);
@@ -324,6 +343,31 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             }
 
             return true;
+        }
+
+        private static bool IntersectsRoomGeometry(RoomAuthoringContext context, DecorAssetDescriptor descriptor, Candidate candidate)
+        {
+            if (context?.obstacles == null) return false;
+            var candidateBoxes = SpatialGeometryUtility.BuildWorldObbs(descriptor, candidate.Position, candidate.Rotation, candidate.Scale);
+            foreach (var obstacle in context.obstacles
+                         .Where(value => value != null && value.policy != RoomObstaclePolicy.Ignore)
+                         .OrderBy(value => value.stableId ?? string.Empty, StringComparer.Ordinal))
+            {
+                // Unknown fixed geometry is a hard blocker: guessing around an unreviewed wall or
+                // pillar would make the deterministic preview appear safer than it is.
+                if (!obstacle.IsUsable) return true;
+                if (IsCandidateContactTarget(candidate, obstacle)) continue;
+                if (SpatialGeometryUtility.Intersects(candidateBoxes, SpatialGeometryUtility.BuildWorldObbs(obstacle))) return true;
+            }
+            return false;
+        }
+
+        private static bool IsCandidateContactTarget(Candidate candidate, RoomObstacleProxy obstacle)
+        {
+            return obstacle.policy == RoomObstaclePolicy.ContactSurface &&
+                   !string.IsNullOrWhiteSpace(obstacle.contactSurfaceId) &&
+                   candidate.Surfaces.Any(surface => surface != null &&
+                       string.Equals(surface.SurfaceId, obstacle.contactSurfaceId, StringComparison.Ordinal));
         }
 
         private static float ScoreCandidate(ConceptRoom room, CompositionElement element, Candidate candidate, IReadOnlyList<PlacedDecorItem> placed)

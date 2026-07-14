@@ -61,6 +61,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var inputHash = RoomReviewHashUtility.ComputeInputHash(inputs);
             var previous = LoadForTarget(inputs.targetId);
             var report = PreviewValidationService.Validate(session);
+            session.ApprovalSnapshot ??= new PreviewApprovalSnapshot();
+            session.ApprovalSnapshot.technicalReportHash = report.reportHash;
+            session.ApprovalSnapshot.humanApproved = false;
             var now = DateTime.UtcNow.ToString("O");
             var changes = RoomReviewHashUtility.Diff(previous?.inputs, inputs);
             var runId = inputHash.Substring(0, 20);
@@ -108,6 +111,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     required = true
                 }).ToList()
             };
+            session.ApprovalSnapshot.captureSetHash = run.capture.captureSetHash;
 
             var evidenceUnchanged = previous != null &&
                                     string.Equals(previous.inputHash, run.inputHash, StringComparison.Ordinal) &&
@@ -132,6 +136,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             }
 
             Save(run);
+            session.ApprovalSnapshot.humanApproved = RoomReviewHashUtility.IsCurrentApproval(run);
             Changed?.Invoke();
             if (openReview) OpenReview();
             return run;
@@ -196,6 +201,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 return false;
             }
             if (!ValidateCaptureEvidence(run.capture, out reason)) return false;
+            session.ApprovalSnapshot ??= new PreviewApprovalSnapshot();
+            session.ApprovalSnapshot.technicalReportHash = report.reportHash;
+            session.ApprovalSnapshot.captureSetHash = run.capture.captureSetHash;
+            session.ApprovalSnapshot.humanApproved = true;
             return true;
         }
 

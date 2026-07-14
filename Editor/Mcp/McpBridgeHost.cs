@@ -269,6 +269,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 assetGapCount = session.AssetGaps.gaps.Count,
                 manifestHash = session.ManifestHash,
                 geometryProfileHash = session.GeometryProfileHash,
+                authoringSourceHash = session.AuthoringSourceHash,
+                obstacleGeometryHash = session.ObstacleGeometryHash,
                 seed = session.Plan.Seed,
                 placements = session.Placements.Select(item => new PlacementDto
                 {
@@ -512,7 +514,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class AssetSearchResultDto { public AssetDto[] assets; }
         [Serializable] private sealed class PathResultDto { public string[] paths; }
         [Serializable] private sealed class StatusDto { public string message; }
-        [Serializable] private sealed class PreviewResultDto { public string sessionId; public int placementCount; public int assetGapCount; public string manifestHash; public string geometryProfileHash; public int seed; public PlacementDto[] placements; }
+        [Serializable] private sealed class PreviewResultDto { public string sessionId; public int placementCount; public int assetGapCount; public string manifestHash; public string geometryProfileHash; public string authoringSourceHash; public string obstacleGeometryHash; public int seed; public PlacementDto[] placements; }
         [Serializable] private sealed class PlacementDto { public string placementId; public string elementId; public string assetId; public string role; public Vector3 position; public Vector3 eulerAngles; public Vector3 scale; public bool locked; }
         [Serializable] private sealed class VisualReviewResultDto { public bool passed; public bool advisoryOnly; public VisualQualityScores scores; }
         [Serializable] private sealed class SpatialCalibrationInfoDto { public string sessionId; public string subjectName; public string subjectAssetPath; public string targetName; public string template; public int collisionProxyCount; public int contactRuleCount; public string technicalState; public int technicalErrorCount; public string captureSetHash; public string[] draftPaths; public bool hasAgentProposal; }

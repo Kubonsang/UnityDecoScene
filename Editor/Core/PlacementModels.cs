@@ -35,12 +35,17 @@ namespace UnityDecoScene.DungeonDecorator.Editor
     {
         public string SessionId;
         public RoomCompositionPlan Plan;
+        public LayoutRequest Request;
+        public RoomAuthoringContext AuthoringContext;
         public GameObject Root;
         public readonly List<PlacedDecorItem> Placements = new();
         public AssetGapReport AssetGaps = new();
         public ValidationReport LastValidation;
         public string ManifestHash;
         public string GeometryProfileHash;
+        public string AuthoringSourceHash;
+        public string ObstacleGeometryHash;
+        public PreviewApprovalSnapshot ApprovalSnapshot = new();
         public readonly List<string> CapturePaths = new();
     }
 

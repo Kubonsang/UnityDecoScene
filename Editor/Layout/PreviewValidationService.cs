@@ -9,7 +9,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 {
     public static class PreviewValidationService
     {
-        public const string ValidationVersion = "room-validator-2";
+        public const string ValidationVersion = "room-validator-3-authoring-obstacles";
 
         public static ValidationReport Validate(PreviewSession session)
         {
@@ -29,9 +29,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (room == null || room.AuthoringBounds == null)
             {
                 report.issues.Add(new ValidationIssue("ROOM_MISSING", ValidationSeverity.Error, "The preview has no valid ConceptRoom authoring bounds."));
-                session.LastValidation = FinalizeReport(report);
+                session.LastValidation = FinalizeReport(report, session);
                 return session.LastValidation;
             }
+
+            ValidateAuthoringContext(session, report);
 
             for (var i = 0; i < session.Placements.Count; i++)
             {
@@ -51,7 +53,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 if (item.descriptor.Geometry == null || !item.descriptor.Geometry.IsUsable)
                     report.issues.Add(new ValidationIssue("GEOMETRY_UNREVIEWED", ValidationSeverity.Error, $"{item.descriptor.name} has no reviewed geometry profile.", item.placementId));
 
-                ValidateContact(room, item, report);
+                ValidateContact(session, room, item, report);
+                ValidateRoomObstacles(session, item, report);
 
                 foreach (var zone in room.KeepClearZones)
                 {
@@ -84,11 +87,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     report.issues.Add(new ValidationIssue("ASSET_GAP", ValidationSeverity.Error, $"{gap.role}: {gap.reason}"));
             }
 
-            session.LastValidation = FinalizeReport(report);
+            session.LastValidation = FinalizeReport(report, session);
             return session.LastValidation;
         }
 
-        private static ValidationReport FinalizeReport(ValidationReport report)
+        private static ValidationReport FinalizeReport(ValidationReport report, PreviewSession session)
         {
             report.issues = report.issues
                 .OrderBy(value => value.code ?? string.Empty, StringComparer.Ordinal)
@@ -99,6 +102,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 .Append(report.validationVersion).Append('|')
                 .Append(report.manifestHash).Append('|')
                 .Append(report.geometryProfileHash).Append('|')
+                .Append(session?.AuthoringSourceHash).Append('|')
+                .Append(session?.ObstacleGeometryHash).Append('|')
                 .Append(report.seed);
             foreach (var issue in report.issues)
             {
@@ -111,7 +116,69 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return report;
         }
 
-        private static void ValidateContact(ConceptRoom room, PlacedDecorItem item, ValidationReport report)
+        private static void ValidateAuthoringContext(PreviewSession session, ValidationReport report)
+        {
+            var context = session.AuthoringContext;
+            if (context == null) return;
+
+            if (!string.Equals(session.AuthoringSourceHash ?? string.Empty, context.sourceHash ?? string.Empty, StringComparison.Ordinal))
+            {
+                report.issues.Add(new ValidationIssue(RoomAuthoringErrorCodes.SourceStale, ValidationSeverity.Error,
+                    "The authoring context source hash changed after this preview was generated."));
+            }
+
+            var currentObstacleHash = context.ComputeObstacleHash();
+            if (!string.IsNullOrWhiteSpace(session.ObstacleGeometryHash) &&
+                !string.Equals(session.ObstacleGeometryHash, currentObstacleHash, StringComparison.Ordinal))
+            {
+                report.issues.Add(new ValidationIssue(RoomAuthoringErrorCodes.SourceStale, ValidationSeverity.Error,
+                    "The room obstacle geometry changed after this preview was generated."));
+            }
+
+            if (!context.IsSourceCurrent(out var currentSourceHash))
+            {
+                report.issues.Add(new ValidationIssue(RoomAuthoringErrorCodes.SourceStale, ValidationSeverity.Error,
+                    $"The authoring source changed after this preview was generated (expected '{session.AuthoringSourceHash}', current '{currentSourceHash}')."));
+            }
+
+            foreach (var obstacle in (context.obstacles ?? new List<RoomObstacleProxy>())
+                         .Where(value => value != null && value.policy != RoomObstaclePolicy.Ignore)
+                         .OrderBy(value => value.stableId ?? string.Empty, StringComparer.Ordinal))
+            {
+                if (obstacle.IsUsable) continue;
+                report.issues.Add(new ValidationIssue(RoomAuthoringErrorCodes.GeometryUnreviewed, ValidationSeverity.Error,
+                    $"Room obstacle '{ObstacleName(obstacle)}' has no reviewed compound OBB geometry.", obstacle.stableId));
+            }
+        }
+
+        private static void ValidateRoomObstacles(PreviewSession session, PlacedDecorItem item, ValidationReport report)
+        {
+            var context = session.AuthoringContext;
+            if (context?.obstacles == null || item?.descriptor?.Geometry == null) return;
+            var itemBoxes = SpatialGeometryUtility.BuildWorldObbs(item.descriptor, item.position, item.rotation, item.scale);
+            foreach (var obstacle in context.obstacles
+                         .Where(value => value != null && value.policy != RoomObstaclePolicy.Ignore && value.IsUsable)
+                         .OrderBy(value => value.stableId ?? string.Empty, StringComparer.Ordinal))
+            {
+                if (IsPlacementContactTarget(item, obstacle)) continue;
+                var obstacleBoxes = SpatialGeometryUtility.BuildWorldObbs(obstacle);
+                if (!SpatialGeometryUtility.Intersects(itemBoxes, obstacleBoxes)) continue;
+                report.issues.Add(new ValidationIssue(RoomAuthoringErrorCodes.GeometryOverlap, ValidationSeverity.Error,
+                    $"{item.descriptor.name} overlaps room geometry '{ObstacleName(obstacle)}'.", item.placementId, obstacle.stableId));
+            }
+        }
+
+        private static bool IsPlacementContactTarget(PlacedDecorItem item, RoomObstacleProxy obstacle)
+        {
+            if (obstacle.policy != RoomObstaclePolicy.ContactSurface || string.IsNullOrWhiteSpace(obstacle.contactSurfaceId)) return false;
+            if (item.surfaceIds != null && item.surfaceIds.Contains(obstacle.contactSurfaceId, StringComparer.Ordinal)) return true;
+            return string.Equals(item.surfaceId, obstacle.contactSurfaceId, StringComparison.Ordinal);
+        }
+
+        private static string ObstacleName(RoomObstacleProxy obstacle) =>
+            !string.IsNullOrWhiteSpace(obstacle.label) ? obstacle.label : obstacle.stableId ?? "unnamed";
+
+        private static void ValidateContact(PreviewSession session, ConceptRoom room, PlacedDecorItem item, ValidationReport report)
         {
             var profile = item.descriptor.Geometry;
             if (profile == null) return;
@@ -130,7 +197,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             {
                 var rule = rules[index];
                 var surfaceId = index < surfaceIds.Count ? surfaceIds[index] : string.Empty;
-                var surface = room.Surfaces.FirstOrDefault(value => value != null && value.SurfaceId == surfaceId);
+                var contextSurfaces = session.AuthoringContext?.surfaces;
+                var surface = contextSurfaces != null && contextSurfaces.Count > 0
+                    ? contextSurfaces.FirstOrDefault(value => value != null && value.SurfaceId == surfaceId)
+                    : room.Surfaces.FirstOrDefault(value => value != null && value.SurfaceId == surfaceId);
                 if (surface == null || !surface.Reviewed)
                 {
                     report.issues.Add(new ValidationIssue("SURFACE_UNREVIEWED", ValidationSeverity.Error, $"{item.descriptor.name} is missing a reviewed {rule.requirement} surface.", item.placementId));

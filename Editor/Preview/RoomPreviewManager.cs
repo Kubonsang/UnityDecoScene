@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace UnityDecoScene.DungeonDecorator.Editor
 {
@@ -24,28 +25,47 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public static PreviewSession GeneratePreview(RoomCompositionPlan plan, bool preserveLocks = true)
         {
+            return GeneratePreview(new LayoutRequest(plan), preserveLocks);
+        }
+
+        public static PreviewSession GeneratePreview(LayoutRequest request, bool preserveLocks = true)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            var plan = request.Plan;
             if (plan == null) throw new ArgumentNullException(nameof(plan));
-            var locked = preserveLocks && Current != null
-                ? Current.Placements.Where(item => item.locked).Select(CloneForRegeneration).ToArray()
-                : Array.Empty<PlacedDecorItem>();
+            var locked = request.LockedPlacements != null
+                ? request.LockedPlacements.Where(item => item != null && item.locked).Select(CloneForRegeneration).ToArray()
+                : preserveLocks && Current != null
+                    ? Current.Placements.Where(item => item.locked).Select(CloneForRegeneration).ToArray()
+                    : Array.Empty<PlacedDecorItem>();
+            var effectiveRequest = new LayoutRequest(plan, locked, request.AuthoringContext);
 
             DiscardPreview(false, plan);
-            var layout = DeterministicLayoutEngine.Generate(plan, locked);
+            var layout = DeterministicLayoutEngine.Generate(effectiveRequest);
             var root = new GameObject(PreviewRootName)
             {
                 hideFlags = HideFlags.DontSaveInEditor
             };
+            var roomScene = plan.Room.gameObject.scene;
+            if (roomScene.IsValid() && roomScene.isLoaded && root.scene != roomScene)
+                SceneManager.MoveGameObjectToScene(root, roomScene);
             root.transform.SetParent(plan.Room.transform, true);
 
             var session = new PreviewSession
             {
                 SessionId = Guid.NewGuid().ToString("N"),
                 Plan = plan,
+                Request = effectiveRequest,
+                AuthoringContext = effectiveRequest.AuthoringContext,
                 Root = root,
                 AssetGaps = layout.AssetGaps,
                 ManifestHash = ComputeManifestHash(plan.Room),
-                GeometryProfileHash = ComputeGeometryHash(plan)
+                GeometryProfileHash = ComputeGeometryHash(plan),
+                AuthoringSourceHash = effectiveRequest.AuthoringContext?.sourceHash ?? string.Empty,
+                ObstacleGeometryHash = effectiveRequest.AuthoringContext?.ComputeObstacleHash() ?? string.Empty
             };
+            session.ApprovalSnapshot.sourceHash = session.AuthoringSourceHash;
+            session.ApprovalSnapshot.obstacleHash = session.ObstacleGeometryHash;
 
             foreach (var placement in layout.Placements)
             {
@@ -70,6 +90,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             Current = session;
             Physics.SyncTransforms();
             Current.LastValidation = PreviewValidationService.Validate(Current);
+            Current.ApprovalSnapshot.technicalReportHash = Current.LastValidation.reportHash;
             Selection.activeGameObject = root;
             SceneView.RepaintAll();
             Changed?.Invoke();
@@ -108,6 +129,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (Current == null) return null;
             SynchronizePreviewTransforms();
             Current.LastValidation = PreviewValidationService.Validate(Current);
+            Current.ApprovalSnapshot.technicalReportHash = Current.LastValidation.reportHash;
             Changed?.Invoke();
             return Current.LastValidation;
         }
@@ -156,6 +178,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             if (Current == null) throw new InvalidOperationException("There is no active preview.");
             SynchronizePreviewTransforms();
+            if (HasAuthoringSourceChanged(Current, out var changeReason))
+                throw new InvalidOperationException($"{RoomAuthoringErrorCodes.ApplySourceChanged}: {changeReason}");
             var report = PreviewValidationService.Validate(Current);
             if (report.HasErrors) throw new InvalidOperationException($"The preview has {report.ErrorCount} technical errors. Resolve them before Apply.");
             if (!RoomReviewWorkflow.HasCurrentHumanApproval(Current, report, out var approvalReason))
@@ -184,6 +208,30 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             DiscardPreview();
             Selection.activeGameObject = container;
             return container;
+        }
+
+        private static bool HasAuthoringSourceChanged(PreviewSession session, out string reason)
+        {
+            reason = string.Empty;
+            var context = session?.AuthoringContext;
+            if (context == null) return false;
+            if (!string.Equals(session.AuthoringSourceHash ?? string.Empty, context.sourceHash ?? string.Empty, StringComparison.Ordinal))
+            {
+                reason = "The authoring context source hash changed after preview generation. Generate a new preview.";
+                return true;
+            }
+            if (!context.IsSourceCurrent(out var currentHash))
+            {
+                reason = $"The source hash changed from '{session.AuthoringSourceHash}' to '{currentHash}'. Generate a new preview.";
+                return true;
+            }
+            var currentObstacleHash = context.ComputeObstacleHash();
+            if (!string.Equals(session.ObstacleGeometryHash ?? string.Empty, currentObstacleHash, StringComparison.Ordinal))
+            {
+                reason = "The room obstacle geometry changed after preview generation. Generate a new preview.";
+                return true;
+            }
+            return false;
         }
 
         public static void DiscardPreview() => DiscardPreview(true);

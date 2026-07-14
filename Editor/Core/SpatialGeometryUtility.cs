@@ -51,9 +51,21 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public static IReadOnlyList<WorldObb> BuildWorldObbs(DecorAssetDescriptor descriptor, Vector3 position, Quaternion rotation, Vector3 scale, float padding = 0f)
         {
+            return BuildWorldObbs(descriptor?.Geometry?.collisionProxies, position, rotation, scale, padding);
+        }
+
+        public static IReadOnlyList<WorldObb> BuildWorldObbs(RoomObstacleProxy obstacle, float padding = 0f)
+        {
+            return obstacle == null
+                ? Array.Empty<WorldObb>()
+                : BuildWorldObbs(obstacle.collisionProxies, obstacle.position, obstacle.rotation, obstacle.scale, padding);
+        }
+
+        public static IReadOnlyList<WorldObb> BuildWorldObbs(IReadOnlyList<OrientedBoxProxy> proxies, Vector3 position, Quaternion rotation, Vector3 scale, float padding = 0f)
+        {
             var result = new List<WorldObb>();
-            if (descriptor?.Geometry?.collisionProxies == null) return result;
-            foreach (var proxy in descriptor.Geometry.collisionProxies)
+            if (proxies == null) return result;
+            foreach (var proxy in proxies)
             {
                 if (proxy == null) continue;
                 var scaledCenter = Vector3.Scale(proxy.localCenter, scale);
