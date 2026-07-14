@@ -65,6 +65,12 @@ Open **Tools > Concept Room Decorator > MCP Bridge Setup** to copy the Node brid
 
 일반적인 룸 검수에서는 에이전트가 캡처 파일을 직접 읽지 않는다. `capture_preview_views`는 명시적인 시각 진단이 필요할 때만 사용하는 고비용 도구다. 기존 `submit_visual_review` 결과 역시 참고용이며 사용자 승인으로 변환되지 않는다. 최종 Apply는 현재 증거 hash에 연결된 사용자 승인이 있을 때만 Unity에서 사용할 수 있다.
 
+## 토큰 절약형 Unity 테스트
+
+열린 Unity 6 Editor에서는 `testplay-runner v0.10.0`의 Warm-Editor Bridge를 우선 사용한다. 기본 회귀 명령은 `Tools~/TestPlay/run-decorator-tests.ps1`이며, `UnityDecoScene.DungeonDecorator` 필터로 패키지 테스트만 실행한다. 성공 시 Unity 원문 로그 대신 `backend`, `exit_code`, `total`, `passed`, `failed`, `skipped`만 포함한 한 줄 JSON을 반환한다.
+
+`backend`가 `bridge`인지 항상 확인한다. Pristine Gate가 warm 결과와 cold 결과의 동등성을 보장할 수 없으면 TestPlay는 자동으로 shadow/process 경로로 폴백한다. `-All`은 호스트 프로젝트 전체 EditMode 기준선을 의도적으로 확인할 때만 사용하며, 실패 원문과 `.testplay/runs/<run_id>/` 아티팩트는 compact JSON만으로 원인을 알 수 없을 때만 읽는다.
+
 The Node bridge optionally starts `unity-ctx mcp` and merges both read-only tool lists. Set `UNITY_CTX_BIN` when the executable is not on `PATH`. Every preview and validation response includes the manifest hash, geometry-profile hash, and seed. The bridge never exposes Unity Apply or a unity-ctx mutation tool.
 
 Spatial tools available to agents are `inspect_spatial_calibration`, `capture_spatial_calibration`, `get_spatial_contract_draft`, `submit_spatial_contract_proposal`, and `get_deterministic_validation_report`. They are intentionally proposal-only. The separate loopback Spatial Review Bridge is the only web path that can invoke the human-reviewed `unity-ctx spatial apply --write` flow.
