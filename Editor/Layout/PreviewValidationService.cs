@@ -1,12 +1,16 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using UnityEngine;
 
 namespace UnityDecoScene.DungeonDecorator.Editor
 {
     public static class PreviewValidationService
     {
+        public const string ValidationVersion = "room-validator-2";
+
         public static ValidationReport Validate(PreviewSession session)
         {
             if (session == null) throw new ArgumentNullException(nameof(session));
@@ -15,6 +19,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 sessionId = session.SessionId,
                 manifestHash = session.ManifestHash,
                 geometryProfileHash = session.GeometryProfileHash,
+                validationVersion = ValidationVersion,
                 seed = session.Plan != null ? session.Plan.Seed : 0,
                 visualScores = session.LastValidation?.visualScores ?? new VisualQualityScores()
             };
@@ -24,7 +29,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (room == null || room.AuthoringBounds == null)
             {
                 report.issues.Add(new ValidationIssue("ROOM_MISSING", ValidationSeverity.Error, "The preview has no valid ConceptRoom authoring bounds."));
-                return report;
+                session.LastValidation = FinalizeReport(report);
+                return session.LastValidation;
             }
 
             for (var i = 0; i < session.Placements.Count; i++)
@@ -75,10 +81,33 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (session.AssetGaps != null)
             {
                 foreach (var gap in session.AssetGaps.gaps)
-                    report.issues.Add(new ValidationIssue("ASSET_GAP", ValidationSeverity.Warning, $"{gap.role}: {gap.reason}"));
+                    report.issues.Add(new ValidationIssue("ASSET_GAP", ValidationSeverity.Error, $"{gap.role}: {gap.reason}"));
             }
 
-            session.LastValidation = report;
+            session.LastValidation = FinalizeReport(report);
+            return session.LastValidation;
+        }
+
+        private static ValidationReport FinalizeReport(ValidationReport report)
+        {
+            report.issues = report.issues
+                .OrderBy(value => value.code ?? string.Empty, StringComparer.Ordinal)
+                .ThenBy(value => value.severity)
+                .ThenBy(value => string.Join("|", (value.elementIds ?? new List<string>()).OrderBy(id => id, StringComparer.Ordinal)), StringComparer.Ordinal)
+                .ToList();
+            var canonical = new StringBuilder()
+                .Append(report.validationVersion).Append('|')
+                .Append(report.manifestHash).Append('|')
+                .Append(report.geometryProfileHash).Append('|')
+                .Append(report.seed);
+            foreach (var issue in report.issues)
+            {
+                canonical.Append('\n').Append(issue.code).Append('|').Append((int)issue.severity).Append('|');
+                foreach (var id in (issue.elementIds ?? new List<string>()).OrderBy(value => value, StringComparer.Ordinal))
+                    canonical.Append(id).Append(',');
+            }
+            using var sha = SHA256.Create();
+            report.reportHash = string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(canonical.ToString())).Select(value => value.ToString("x2")));
             return report;
         }
 
