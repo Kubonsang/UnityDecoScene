@@ -13,7 +13,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
     /// </summary>
     public static class RoomReviewSnapshotService
     {
-        public const string CaptureProfileVersion = "room-capture-4view-v1-768";
+        public const string CaptureProfileVersion = "room-capture-4view-wall-contact-v2-768";
 
         public static RoomReviewInputs Capture(PreviewSession session)
         {
@@ -49,6 +49,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             inputs.conceptHash = Aggregate(conceptItems);
             inputs.placementHash = Aggregate(placementItems);
             inputs.presentationHash = Aggregate(presentationItems);
+            session.ApprovalSnapshot ??= new PreviewApprovalSnapshot();
+            session.ApprovalSnapshot.sourceHash = session.AuthoringSourceHash ?? string.Empty;
+            session.ApprovalSnapshot.obstacleHash = session.ObstacleGeometryHash ?? string.Empty;
+            session.ApprovalSnapshot.placementHash = inputs.placementHash;
             return inputs;
         }
 
@@ -62,11 +66,26 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 bounds != null ? Collider(bounds) : "missing",
                 F(room.BoundaryPadding))));
 
+            if (session.AuthoringContext != null)
+            {
+                var sourceHash = session.AuthoringSourceHash ?? session.AuthoringContext.sourceHash ?? string.Empty;
+                var obstacleHash = session.ObstacleGeometryHash ?? session.AuthoringContext.ComputeObstacleHash();
+                result.Add(Item("authoring:source", RoomReviewChangeScope.RoomShell, RoomReviewHashUtility.HashParts(
+                    session.AuthoringContext.adapterId ?? string.Empty,
+                    session.AuthoringContext.adapterVersion ?? string.Empty,
+                    session.AuthoringContext.sourceId ?? string.Empty,
+                    sourceHash)));
+                result.Add(Item("authoring:obstacles", RoomReviewChangeScope.RoomShell, RoomReviewHashUtility.Sha256(obstacleHash)));
+            }
+
             var floorFingerprints = room.FloorColliders.Where(value => value != null).Select(Collider).OrderBy(value => value, StringComparer.Ordinal).ToArray();
             for (var index = 0; index < floorFingerprints.Length; index++)
                 result.Add(Item($"floor:{index}", RoomReviewChangeScope.RoomShell, RoomReviewHashUtility.Sha256(floorFingerprints[index])));
 
-            foreach (var surface in room.Surfaces.Where(value => value != null).OrderBy(value => value.SurfaceId, StringComparer.Ordinal))
+            var reviewSurfaces = session.AuthoringContext?.surfaces != null && session.AuthoringContext.surfaces.Count > 0
+                ? session.AuthoringContext.surfaces
+                : room.Surfaces;
+            foreach (var surface in reviewSurfaces.Where(value => value != null).OrderBy(value => value.SurfaceId, StringComparer.Ordinal))
             {
                 result.Add(Item($"surface:{surface.SurfaceId}", RoomReviewChangeScope.RoomShell, RoomReviewHashUtility.HashParts(
                     surface.SurfaceId ?? string.Empty,

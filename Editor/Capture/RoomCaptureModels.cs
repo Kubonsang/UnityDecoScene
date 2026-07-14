@@ -10,6 +10,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public const string PrimaryObservation = "primary-observation";
         public const string CornerA = "corner-a";
         public const string CornerB = "corner-b";
+        public const string WallContactSidePrefix = "wall-contact-side-";
+
+        public static bool IsWallContactSide(string viewId) =>
+            !string.IsNullOrWhiteSpace(viewId) &&
+            viewId.StartsWith(WallContactSidePrefix, StringComparison.Ordinal);
     }
 
     [Serializable]

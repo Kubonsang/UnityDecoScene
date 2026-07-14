@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace UnityDecoScene.DungeonDecorator.Editor
 {
@@ -14,31 +17,24 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private const int ManifestVersion = 1;
         private const string ManifestFileName = "capture-manifest.json";
 
-        private static readonly string[] FixedViewIds =
-        {
-            RoomCaptureViewIds.Top,
-            RoomCaptureViewIds.PrimaryObservation,
-            RoomCaptureViewIds.CornerA,
-            RoomCaptureViewIds.CornerB
-        };
-
         public static IReadOnlyList<string> CaptureAll(PreviewSession session)
         {
             ValidateSession(session);
             var room = session.Plan.Room;
+            var captureScene = ResolveCaptureScene(session);
             var bounds = room.AuthoringBounds.bounds;
             var directory = Path.GetFullPath(Path.Combine(Application.dataPath, $"../Library/DungeonDecorator/Captures/{session.SessionId}"));
             Directory.CreateDirectory(directory);
             session.CapturePaths.Clear();
 
             var topPosition = bounds.center + Vector3.up * (bounds.extents.y + Mathf.Max(bounds.size.x, bounds.size.z) + 2f);
-            session.CapturePaths.Add(Render(directory, "top", topPosition, Quaternion.LookRotation(Vector3.down, Vector3.forward), true, Mathf.Max(bounds.extents.x, bounds.extents.z) * 1.15f, 60f));
+            session.CapturePaths.Add(Render(directory, "top", topPosition, Quaternion.LookRotation(Vector3.down, Vector3.forward), true, Mathf.Max(bounds.extents.x, bounds.extents.z) * 1.15f, 60f, captureScene));
 
             var observationIndex = 0;
             foreach (var observation in room.ObservationPoints)
             {
                 if (observation == null) continue;
-                session.CapturePaths.Add(Render(directory, $"observation-{observationIndex++}", observation.transform.position, observation.transform.rotation, false, 5f, observation.FieldOfView));
+                session.CapturePaths.Add(Render(directory, $"observation-{observationIndex++}", observation.transform.position, observation.transform.rotation, false, 5f, observation.FieldOfView, captureScene));
             }
 
             var height = bounds.min.y + bounds.size.y * 0.65f;
@@ -47,14 +43,17 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var cornerA = new Vector3(bounds.min.x + insetX, height, bounds.min.z + insetZ);
             var cornerB = new Vector3(bounds.max.x - insetX, height, bounds.max.z - insetZ);
             var floorFocus = new Vector3(bounds.center.x, bounds.min.y + bounds.size.y * 0.3f, bounds.center.z);
-            session.CapturePaths.Add(Render(directory, "corner-a", cornerA, Quaternion.LookRotation((floorFocus - cornerA).normalized, Vector3.up), false, 5f, 58f));
-            session.CapturePaths.Add(Render(directory, "corner-b", cornerB, Quaternion.LookRotation((floorFocus - cornerB).normalized, Vector3.up), false, 5f, 58f));
+            session.CapturePaths.Add(Render(directory, "corner-a", cornerA, Quaternion.LookRotation((floorFocus - cornerA).normalized, Vector3.up), false, 5f, 58f, captureScene));
+            session.CapturePaths.Add(Render(directory, "corner-b", cornerB, Quaternion.LookRotation((floorFocus - cornerB).normalized, Vector3.up), false, 5f, 58f, captureScene));
+            foreach (var view in BuildWallContactViews(session))
+                session.CapturePaths.Add(Render(directory, view.Id, view.Position, view.Rotation, view.Orthographic, view.OrthographicSize, view.FieldOfView, captureScene));
             return session.CapturePaths;
         }
 
         /// <summary>
-        /// Captures the four stable room-review views and writes a cache manifest. This overload
-        /// deliberately renders a fresh set; use the input-key overload for verified cache reuse.
+        /// Captures the four stable room-review views plus deterministic wall-contact side close-ups
+        /// for eligible placements, then writes a cache manifest. This overload deliberately renders
+        /// a fresh set; use the input-key overload for verified cache reuse.
         /// </summary>
         public static RoomCaptureSet CaptureSet(PreviewSession session, string outputDirectory)
         {
@@ -88,7 +87,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (string.IsNullOrWhiteSpace(outputDirectory)) throw new ArgumentException("An output directory is required.", nameof(outputDirectory));
             var directory = Path.GetFullPath(outputDirectory);
             Directory.CreateDirectory(directory);
-            var views = BuildFixedViews(session.Plan.Room);
+            var views = BuildCaptureViews(session);
 
             if (allowCache && TryReadCachedSet(directory, inputKey, views, out var cached))
             {
@@ -97,9 +96,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             }
 
             var result = new RoomCaptureSet { inputKey = inputKey, renderedCount = views.Count, reusedFromCache = false };
+            var captureScene = ResolveCaptureScene(session);
             foreach (var view in views)
             {
-                var path = Render(directory, view.Id, view.Position, view.Rotation, view.Orthographic, view.OrthographicSize, view.FieldOfView);
+                var path = Render(directory, view.Id, view.Position, view.Rotation, view.Orthographic, view.OrthographicSize, view.FieldOfView, captureScene);
                 result.entries.Add(new RoomCaptureEntry(view.Id, path, HashFile(path)));
             }
             result.captureSetHash = ComputeCaptureSetHash(result.entries);
@@ -145,6 +145,125 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return views;
         }
 
+        private static IReadOnlyList<CaptureView> BuildCaptureViews(PreviewSession session)
+        {
+            var views = new List<CaptureView>(BuildFixedViews(session.Plan.Room));
+            views.AddRange(BuildWallContactViews(session));
+            return views;
+        }
+
+        private static IEnumerable<CaptureView> BuildWallContactViews(PreviewSession session)
+        {
+            var emittedViewIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var placement in session.Placements
+                         .Where(value => value?.descriptor?.Geometry != null)
+                         .OrderBy(value => value.placementId ?? string.Empty, StringComparer.Ordinal)
+                         .ThenBy(value => value.descriptor.AssetId ?? string.Empty, StringComparer.Ordinal)
+                         .ThenBy(value => value.instanceIndex))
+            {
+                var effectiveRules = placement.descriptor.Geometry.EffectiveContacts
+                    .Where(value => value != null && value.requirement != ContactRequirement.FreeStanding)
+                    .ToArray();
+                var wallRuleIndex = Array.FindIndex(effectiveRules, value =>
+                    value.requirement == ContactRequirement.WallBacked ||
+                    value.requirement == ContactRequirement.WallMounted && IsMountedLight(placement.descriptor));
+                if (wallRuleIndex < 0) continue;
+
+                var surfaceId = ResolveSurfaceId(placement, wallRuleIndex);
+                var surface = ResolveSurface(session, surfaceId);
+                if (surface == null || surface.SurfaceType != RoomSurfaceType.Wall) continue;
+
+                var contactPoint = ResolveContactPoint(placement, effectiveRules[wallRuleIndex], wallRuleIndex);
+                var bounds = ResolvePlacementBounds(placement);
+                var tangent = CanonicalDirection(surface.Tangent, Vector3.right);
+                var tangentExtent = Vector3.Dot(
+                    new Vector3(Mathf.Abs(tangent.x), Mathf.Abs(tangent.y), Mathf.Abs(tangent.z)),
+                    bounds.extents);
+                var distance = Mathf.Max(1.25f, tangentExtent + 0.75f);
+                var outwardOffset = surface.Normal * Mathf.Clamp(bounds.extents.magnitude * 0.12f, 0.05f, 0.25f);
+                var position = contactPoint + tangent * distance + outwardOffset;
+                var direction = contactPoint - position;
+                var up = Vector3.ProjectOnPlane(Vector3.up, direction).normalized;
+                if (up.sqrMagnitude < 0.000001f) up = CanonicalDirection(surface.Bitangent, Vector3.up);
+                var orthographicSize = Mathf.Max(0.35f, bounds.extents.magnitude * 1.15f);
+                var id = ContactViewId(placement);
+                if (!emittedViewIds.Add(id)) continue;
+                yield return new CaptureView(id, position, Quaternion.LookRotation(direction.normalized, up), true, orthographicSize, 42f);
+            }
+        }
+
+        private static bool IsMountedLight(DecorAssetDescriptor descriptor)
+        {
+            if (descriptor.AssetType == DecorAssetType.Light) return true;
+            var id = descriptor.AssetId ?? string.Empty;
+            var prefabName = descriptor.Prefab != null ? descriptor.Prefab.name : string.Empty;
+            return id.IndexOf("torch", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   prefabName.IndexOf("torch", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string ResolveSurfaceId(PlacedDecorItem placement, int ruleIndex)
+        {
+            if (placement.surfaceIds != null && ruleIndex >= 0 && ruleIndex < placement.surfaceIds.Count)
+                return placement.surfaceIds[ruleIndex];
+            return ruleIndex == 0 ? placement.surfaceId : string.Empty;
+        }
+
+        private static RoomSurface ResolveSurface(PreviewSession session, string surfaceId)
+        {
+            if (string.IsNullOrWhiteSpace(surfaceId)) return null;
+            var contextSurfaces = session.AuthoringContext?.surfaces;
+            if (contextSurfaces != null && contextSurfaces.Count > 0)
+                return contextSurfaces.FirstOrDefault(value => value != null && string.Equals(value.SurfaceId, surfaceId, StringComparison.Ordinal));
+            return session.Plan.Room.Surfaces.FirstOrDefault(value => value != null && string.Equals(value.SurfaceId, surfaceId, StringComparison.Ordinal));
+        }
+
+        private static Vector3 ResolveContactPoint(PlacedDecorItem placement, ContactRules rules, int ruleIndex)
+        {
+            if (placement.contactEvidenceSet != null && ruleIndex >= 0 && ruleIndex < placement.contactEvidenceSet.Count)
+            {
+                var evidence = placement.contactEvidenceSet[ruleIndex];
+                if (evidence != null) return evidence.contactPoint;
+            }
+            if (ruleIndex == 0 && placement.contactEvidence != null) return placement.contactEvidence.contactPoint;
+            var frame = placement.descriptor.Geometry.FrameFor(rules);
+            return frame != null
+                ? placement.position + placement.rotation * Vector3.Scale(frame.localPoint, placement.scale)
+                : placement.worldBounds.center;
+        }
+
+        private static Bounds ResolvePlacementBounds(PlacedDecorItem placement)
+        {
+            if (placement.worldBounds.size.sqrMagnitude > 0.000001f) return placement.worldBounds;
+            var boxes = SpatialGeometryUtility.BuildWorldObbs(placement.descriptor, placement.position, placement.rotation, placement.scale);
+            var bounds = SpatialGeometryUtility.CombinedAabb(boxes);
+            return bounds.size.sqrMagnitude > 0.000001f ? bounds : new Bounds(placement.position, Vector3.one);
+        }
+
+        private static string ContactViewId(PlacedDecorItem placement)
+        {
+            var label = string.IsNullOrWhiteSpace(placement.placementId)
+                ? $"{placement.descriptor.AssetId}:{placement.instanceIndex}"
+                : placement.placementId;
+            var identity = string.Join("|", label, placement.descriptor.AssetId ?? string.Empty, placement.instanceIndex.ToString(CultureInfo.InvariantCulture));
+            var slug = new string(label.ToLowerInvariant()
+                .Select(value => char.IsLetterOrDigit(value) ? value : '-')
+                .ToArray()).Trim('-');
+            while (slug.Contains("--", StringComparison.Ordinal)) slug = slug.Replace("--", "-", StringComparison.Ordinal);
+            if (string.IsNullOrWhiteSpace(slug)) slug = "placement";
+            if (slug.Length > 40) slug = slug.Substring(0, 40).TrimEnd('-');
+            var suffix = Sha256(Encoding.UTF8.GetBytes(identity)).Substring(0, 8);
+            return RoomCaptureViewIds.WallContactSidePrefix + slug + "-" + suffix;
+        }
+
+        private static Vector3 CanonicalDirection(Vector3 direction, Vector3 fallback)
+        {
+            if (direction.sqrMagnitude < 0.000001f) direction = fallback;
+            direction.Normalize();
+            var flip = Mathf.Abs(direction.x) > 0.000001f ? direction.x < 0f :
+                Mathf.Abs(direction.y) > 0.000001f ? direction.y < 0f : direction.z < 0f;
+            return flip ? -direction : direction;
+        }
+
         private static bool TryReadCachedSet(string directory, string inputKey, IReadOnlyList<CaptureView> views, out RoomCaptureSet set)
         {
             set = null;
@@ -157,7 +276,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (manifest == null || manifest.version != ManifestVersion || !string.Equals(manifest.inputKey, inputKey, StringComparison.Ordinal)) return false;
             if (manifest.entries == null || manifest.entries.Count != views.Count) return false;
 
-            var expected = views.ToDictionary(view => view.Id, StringComparer.Ordinal);
+            var expected = views.Select((view, index) => new { view.Id, Index = index })
+                .ToDictionary(value => value.Id, value => value.Index, StringComparer.Ordinal);
             var entries = new List<RoomCaptureEntry>(views.Count);
             foreach (var cached in manifest.entries)
             {
@@ -171,14 +291,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 entries.Add(new RoomCaptureEntry(cached.viewId, path, actualHash));
             }
 
-            if (entries.Select(entry => entry.viewId).Distinct(StringComparer.Ordinal).Count() != FixedViewIds.Length) return false;
+            if (entries.Select(entry => entry.viewId).Distinct(StringComparer.Ordinal).Count() != views.Count) return false;
             var captureSetHash = ComputeCaptureSetHash(entries);
             if (!string.Equals(captureSetHash, manifest.captureSetHash, StringComparison.Ordinal)) return false;
             set = new RoomCaptureSet
             {
                 inputKey = inputKey,
                 captureSetHash = captureSetHash,
-                entries = entries.OrderBy(entry => Array.IndexOf(FixedViewIds, entry.viewId)).ToList(),
+                entries = entries.OrderBy(entry => expected[entry.viewId]).ToList(),
                 renderedCount = 0,
                 reusedFromCache = true
             };
@@ -213,6 +333,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var canonical = new StringBuilder();
             canonical.Append(session.ManifestHash ?? string.Empty).Append('|')
                 .Append(session.GeometryProfileHash ?? string.Empty).Append('|')
+                .Append(session.AuthoringSourceHash ?? string.Empty).Append('|')
+                .Append(session.ObstacleGeometryHash ?? string.Empty).Append('|')
                 .Append(session.Plan.Seed).Append('|');
             foreach (var placement in session.Placements.Where(value => value != null).OrderBy(value => value.placementId, StringComparer.Ordinal))
             {
@@ -223,7 +345,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 Append(canonical, placement.scale);
                 canonical.Append('|');
             }
-            foreach (var view in BuildFixedViews(session.Plan.Room))
+            foreach (var view in BuildCaptureViews(session))
             {
                 canonical.Append(view.Id).Append(':');
                 Append(canonical, view.Position);
@@ -284,10 +406,24 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 throw new InvalidOperationException("An active room preview with authoring bounds is required.");
         }
 
-        private static string Render(string directory, string name, Vector3 position, Quaternion rotation, bool orthographic, float orthographicSize, float fieldOfView)
+        private static Scene ResolveCaptureScene(PreviewSession session)
         {
+            if (session.Root != null && session.Root.scene.IsValid()) return session.Root.scene;
+            return session.Plan.Room.gameObject.scene;
+        }
+
+        private static string Render(string directory, string name, Vector3 position, Quaternion rotation, bool orthographic, float orthographicSize, float fieldOfView, Scene captureScene)
+        {
+            var previousActiveScene = SceneManager.GetActiveScene();
+            var restoreActiveScene = captureScene.IsValid() && captureScene.isLoaded &&
+                                     previousActiveScene.IsValid() && previousActiveScene.isLoaded &&
+                                     previousActiveScene != captureScene &&
+                                     SceneManager.SetActiveScene(captureScene);
             var cameraObject = new GameObject("Concept Room Capture Camera") { hideFlags = HideFlags.HideAndDontSave };
+            if (captureScene.IsValid()) SceneManager.MoveGameObjectToScene(cameraObject, captureScene);
             var camera = cameraObject.AddComponent<Camera>();
+            var previousSceneCullingMask = camera.overrideSceneCullingMask;
+            if (captureScene.IsValid()) camera.overrideSceneCullingMask = EditorSceneManager.GetSceneCullingMask(captureScene);
             camera.transform.SetPositionAndRotation(position, rotation);
             camera.orthographic = orthographic;
             camera.orthographicSize = Mathf.Max(0.1f, orthographicSize);
@@ -316,9 +452,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             {
                 RenderTexture.active = previous;
                 camera.targetTexture = null;
+                camera.overrideSceneCullingMask = previousSceneCullingMask;
                 RenderTexture.ReleaseTemporary(renderTexture);
                 UnityEngine.Object.DestroyImmediate(texture);
                 UnityEngine.Object.DestroyImmediate(cameraObject);
+                if (restoreActiveScene && previousActiveScene.IsValid() && previousActiveScene.isLoaded)
+                    SceneManager.SetActiveScene(previousActiveScene);
             }
         }
 

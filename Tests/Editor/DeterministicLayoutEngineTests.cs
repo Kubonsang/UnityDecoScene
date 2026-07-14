@@ -51,6 +51,44 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void ContactPlacementProjectsRelationAnchorOntoFloorInsteadOfResampling()
+        {
+            var room = CreateRoom();
+            room.AuthoringBounds.size = new Vector3(100f, 4f, 100f);
+            var floor = room.FloorColliders[0] as BoxCollider;
+            floor.size = new Vector3(100f, 0.2f, 100f);
+            var floorSurface = room.Surfaces.Single(value => value.SurfaceType == RoomSurfaceType.Floor);
+            floorSurface.Configure("floor-main", RoomSurfaceType.Floor, floor, Vector3.zero, Vector3.up, Vector3.right, new Vector2(100f, 100f), true);
+
+            var hero = CreateDescriptor("relation-hero", "gothic", DecorRole.Hero);
+            var support = CreateDescriptor("relation-support", "gothic", DecorRole.Support);
+            var catalog = Track(ScriptableObject.CreateInstance<DecorCatalog>());
+            catalog.ReplaceAll(new[] { hero, support });
+            var plan = Track(ScriptableObject.CreateInstance<RoomCompositionPlan>());
+            plan.Configure(room, null, catalog, 20260715, 0.5f, new[]
+            {
+                new CompositionElement { elementId = "hero", descriptorId = hero.AssetId, role = DecorRole.Hero, preferredZone = PreferredZone.Center },
+                new CompositionElement
+                {
+                    elementId = "support",
+                    descriptorId = support.AssetId,
+                    role = DecorRole.Support,
+                    relation = CompositionRelation.ScatteredNear,
+                    anchorElementId = "hero",
+                    spacing = 1.5f
+                }
+            });
+
+            var result = DeterministicLayoutEngine.Generate(plan);
+
+            Assert.That(result.Placements, Has.Count.EqualTo(2));
+            var heroPlacement = result.Placements.Single(value => value.elementId == "hero");
+            var supportPlacement = result.Placements.Single(value => value.elementId == "support");
+            Assert.That(Vector3.Distance(heroPlacement.position, supportPlacement.position), Is.InRange(1.1f, 1.9f));
+            Assert.That(supportPlacement.contactEvidence.valid, Is.True);
+        }
+
+        [Test]
         public void MixedStyleSetBecomesAssetGapInsteadOfFallbackPlacement()
         {
             var room = CreateRoom();
