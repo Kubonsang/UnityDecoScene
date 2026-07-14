@@ -60,10 +60,24 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             reason = null;
             if (descriptor == null || descriptor.Prefab == null) { reason = "Descriptor and prefab are required."; return false; }
+            if (!TryCreateApprovedGeometry(path, descriptor, out var profile, out reason)) return false;
+            Undo.RecordObject(descriptor, "Import approved spatial contract");
+            descriptor.ConfigureGeometry(profile);
+            EditorUtility.SetDirty(descriptor);
+            AssetDatabase.SaveAssets();
+            return true;
+        }
+
+        public static bool TryCreateApprovedGeometry(string path, DecorAssetDescriptor descriptor, out DecorGeometryProfile profile, out string reason)
+        {
+            profile = null;
+            reason = null;
+            if (descriptor == null || descriptor.Prefab == null) { reason = "Descriptor and prefab are required."; return false; }
             SpatialContractDocument document;
             try { document = Load(path); }
             catch (Exception exception) { reason = exception.Message; return false; }
             if (!document.IsApproved || document.contract_type != "asset" || document.asset == null) { reason = "Only human-approved asset contracts can be imported."; return false; }
+            if (!SpatialContractHashUtility.ValidateApproved(document, out reason)) return false;
             var prefabPath = AssetDatabase.GetAssetPath(descriptor.Prefab);
             var guid = AssetDatabase.AssetPathToGUID(prefabPath);
             var dependencyHash = AssetDatabase.GetAssetDependencyHash(prefabPath).ToString();
@@ -73,7 +87,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var frames = document.asset.frames.ToDictionary(value => value.id, value => value.ToFrame(), StringComparer.Ordinal);
             var importedContacts = document.asset.contacts.Select(ToRules).ToList();
             var primary = importedContacts.FirstOrDefault();
-            var profile = new DecorGeometryProfile
+            profile = new DecorGeometryProfile
             {
                 source = GeometrySource.Manual,
                 collisionProxies = document.asset.collision_proxies.Select(value => value.ToProxy()).ToList(),
@@ -89,10 +103,6 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 dependencyHash = dependencyHash
             };
             profile.Normalize();
-            Undo.RecordObject(descriptor, "Import approved spatial contract");
-            descriptor.ConfigureGeometry(profile);
-            EditorUtility.SetDirty(descriptor);
-            AssetDatabase.SaveAssets();
             return true;
         }
 

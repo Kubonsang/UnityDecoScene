@@ -12,9 +12,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [SerializeField] private DecorCatalog catalog;
         [SerializeField] private DefaultAsset prefabFolder;
         [SerializeField] private string descriptorFolder = "Assets/ConceptRoomDecorator/Descriptors";
+        [SerializeField] private string approvedContractRoot = "Assets/SpatialContracts/Assets";
         private Vector2 scroll;
         private string status;
         private bool unityCtxAvailable;
+        private ApprovedContractSyncPlan contractSyncPlan;
 
         [MenuItem("Window/Concept Room Decorator")]
         public static void Open() => GetWindow<ConceptRoomDecoratorWindow>("Concept Room Decorator");
@@ -114,6 +116,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             catalog = (DecorCatalog)EditorGUILayout.ObjectField("Catalog", catalog != null ? catalog : plan != null ? plan.Catalog : null, typeof(DecorCatalog), false);
             prefabFolder = (DefaultAsset)EditorGUILayout.ObjectField("Prefab Folder", prefabFolder, typeof(DefaultAsset), false);
             descriptorFolder = EditorGUILayout.TextField("Descriptor Folder", descriptorFolder);
+            approvedContractRoot = EditorGUILayout.TextField("Approved Contracts", approvedContractRoot);
 
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -130,6 +133,35 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                         status = $"Catalog sheet written to {path}";
                         EditorUtility.RevealInFinder(path);
                     });
+                }
+            }
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUI.DisabledScope(catalog == null))
+                {
+                    if (GUILayout.Button("Preview Contract Sync")) RunSafe(() =>
+                    {
+                        contractSyncPlan = ApprovedContractSyncService.Preview(catalog, approvedContractRoot);
+                        status = $"Contract sync preview: {contractSyncPlan.ReadyCount} ready, {contractSyncPlan.BlockerCount} blocked.";
+                    });
+                }
+                using (new EditorGUI.DisabledScope(contractSyncPlan == null || contractSyncPlan.ReadyCount == 0))
+                {
+                    if (GUILayout.Button("Sync Approved Geometry")) RunSafe(() =>
+                    {
+                        var applied = ApprovedContractSyncService.Apply(contractSyncPlan);
+                        status = $"Imported {applied} approved geometry profiles in one Undo operation.";
+                    });
+                }
+            }
+            if (contractSyncPlan != null)
+            {
+                foreach (var item in contractSyncPlan.items.Where(value => value.status != ApprovedContractSyncStatus.Unchanged))
+                {
+                    var messageType = item.status is ApprovedContractSyncStatus.Ready or ApprovedContractSyncStatus.Applied
+                        ? MessageType.Info
+                        : item.status == ApprovedContractSyncStatus.Missing ? MessageType.Warning : MessageType.Error;
+                    EditorGUILayout.HelpBox($"{item.descriptor?.name ?? item.assetGuid}: {item.status} — {item.message}", messageType);
                 }
             }
             if (catalog != null)
