@@ -105,6 +105,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 worldBounds = chosen.Bounds,
                 surfaceId = chosen.Surface != null ? chosen.Surface.SurfaceId : string.Empty,
                 contactEvidence = chosen.Contact,
+                surfaceIds = chosen.Surfaces.Select(value => value.SurfaceId).ToList(),
+                contactEvidenceSet = chosen.Contacts.ToList(),
                 locked = element.locked
             };
         }
@@ -134,40 +136,112 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 }
             }
 
-            var requirement = descriptor.Geometry.contact.requirement;
-            var surfaceType = requirement switch
+            var profile = descriptor.Geometry;
+            var rules = profile.EffectiveContacts
+                .Where(value => value != null && value.requirement != ContactRequirement.FreeStanding)
+                .OrderBy(ContactOrder)
+                .ToArray();
+            var targetSurfaces = new List<RoomSurface>();
+            var contacts = new List<ContactEvidence>();
+            if (rules.Length > 0)
             {
-                ContactRequirement.WallBacked or ContactRequirement.WallMounted => RoomSurfaceType.Wall,
-                ContactRequirement.CeilingMounted => RoomSurfaceType.Ceiling,
-                _ => RoomSurfaceType.Floor
-            };
-            var surfaces = room.GetReviewedSurfaces(surfaceType).OrderBy(value => value.SurfaceId, StringComparer.Ordinal).ToArray();
-            if (requirement != ContactRequirement.FreeStanding && surfaces.Length == 0) return false;
-            RoomSurface targetSurface = surfaces.Length > 0 ? surfaces[(attempt + instanceIndex) % surfaces.Length] : null;
-            ContactEvidence contact = null;
-            if (requirement != ContactRequirement.FreeStanding)
-            {
-                var profile = descriptor.Geometry;
-                var frame = requirement is ContactRequirement.WallBacked or ContactRequirement.WallMounted ? profile.backContact : profile.bottomContact;
-                rotation = SpatialGeometryUtility.AlignContactFrame(profile, targetSurface);
-                if (surfaceType == RoomSurfaceType.Floor)
-                    rotation = Quaternion.AngleAxis(yaw, targetSurface.Normal) * rotation;
-                var halfWidth = Mathf.Min(targetSurface.Size.x * 0.45f, Mathf.Max(0f, targetSurface.Size.x * 0.5f - frame.size.x * scalar * 0.5f));
-                var halfHeight = Mathf.Min(targetSurface.Size.y * 0.45f, Mathf.Max(0f, targetSurface.Size.y * 0.5f - frame.size.y * scalar * 0.5f));
+                var primary = rules[0];
+                var surfaceType = SurfaceTypeFor(primary.requirement);
+                var surfaces = ReviewedSurfaces(room, surfaceType, element.preferredSurfaceId);
+                if (surfaces.Length == 0) return false;
+                var targetSurface = surfaces[(attempt + instanceIndex) % surfaces.Length];
+                var frame = profile.FrameFor(primary);
+                rotation = SpatialGeometryUtility.AlignContactFrame(profile, primary, targetSurface);
+                if (surfaceType == RoomSurfaceType.Floor) rotation = Quaternion.AngleAxis(yaw, targetSurface.Normal) * rotation;
+                var edgePadding = Mathf.Max(0.25f, descriptor.Clearance);
+                var halfWidth = Mathf.Max(0f, targetSurface.Size.x * 0.5f - frame.size.x * scalar * 0.5f - edgePadding);
+                var halfHeight = Mathf.Max(0f, targetSurface.Size.y * 0.5f - frame.size.y * scalar * 0.5f - edgePadding);
                 var horizontal = Mathf.Lerp(-halfWidth, halfWidth, (float)random.NextDouble());
                 var vertical = Mathf.Lerp(-halfHeight, halfHeight, (float)random.NextDouble());
                 var surfacePoint = targetSurface.Point(horizontal, vertical);
-                var targetGap = requirement == ContactRequirement.FloorSupported ? 0f : (profile.contact.minimumGap + profile.contact.maximumGap) * 0.5f;
+                var targetGap = TargetGap(primary);
                 worldPoint = SpatialGeometryUtility.PlaceContactAtSurface(profile, frame, targetSurface, surfacePoint, rotation, scale, targetGap);
-                contact = SpatialGeometryUtility.EvaluateContact(descriptor, worldPoint, rotation, scale, targetSurface);
-                if (!contact.valid) return false;
+                targetSurfaces.Add(targetSurface);
+
+                for (var ruleIndex = 1; ruleIndex < rules.Length; ruleIndex++)
+                {
+                    var secondary = rules[ruleIndex];
+                    if (!TryAttachSecondary(room, descriptor, secondary, rotation, scale, targetSurfaces, ref worldPoint, out var secondarySurface)) return false;
+                    targetSurfaces.Add(secondarySurface);
+                }
+
+                for (var ruleIndex = 0; ruleIndex < rules.Length; ruleIndex++)
+                {
+                    var evidence = SpatialGeometryUtility.EvaluateContact(descriptor, rules[ruleIndex], worldPoint, rotation, scale, targetSurfaces[ruleIndex]);
+                    if (!evidence.valid) return false;
+                    contacts.Add(evidence);
+                }
             }
 
             var boxes = SpatialGeometryUtility.BuildWorldObbs(descriptor, worldPoint, rotation, scale);
             var bounds = SpatialGeometryUtility.CombinedAabb(boxes);
-            candidate = new Candidate(worldPoint, rotation, scale, bounds, targetSurface, contact, 0f);
+            candidate = new Candidate(worldPoint, rotation, scale, bounds, targetSurfaces, contacts, 0f);
             return true;
         }
+
+        private static bool TryAttachSecondary(ConceptRoom room, DecorAssetDescriptor descriptor, ContactRules rules, Quaternion rotation, Vector3 scale, IReadOnlyList<RoomSurface> existingSurfaces, ref Vector3 position, out RoomSurface targetSurface)
+        {
+            targetSurface = null;
+            var frame = descriptor.Geometry.FrameFor(rules);
+            foreach (var candidateSurface in ReviewedSurfaces(room, SurfaceTypeFor(rules.requirement)))
+            {
+                var contactPoint = position + rotation * Vector3.Scale(frame.localPoint, scale);
+                var signedDistance = Vector3.Dot(contactPoint - candidateSurface.Origin, candidateSurface.Normal);
+                var adjusted = position + candidateSurface.Normal * (TargetGap(rules) - signedDistance);
+                var evidence = SpatialGeometryUtility.EvaluateContact(descriptor, rules, adjusted, rotation, scale, candidateSurface);
+                if (!evidence.valid) continue;
+
+                var previousStillValid = true;
+                var effectiveRules = descriptor.Geometry.EffectiveContacts
+                    .Where(value => value != null && value.requirement != ContactRequirement.FreeStanding)
+                    .OrderBy(ContactOrder)
+                    .ToArray();
+                for (var index = 0; index < existingSurfaces.Count; index++)
+                {
+                    if (index >= effectiveRules.Length || !SpatialGeometryUtility.EvaluateContact(descriptor, effectiveRules[index], adjusted, rotation, scale, existingSurfaces[index]).valid)
+                    {
+                        previousStillValid = false;
+                        break;
+                    }
+                }
+                if (!previousStillValid) continue;
+                position = adjusted;
+                targetSurface = candidateSurface;
+                return true;
+            }
+            return false;
+        }
+
+        private static RoomSurface[] ReviewedSurfaces(ConceptRoom room, RoomSurfaceType type, string preferredSurfaceId = null)
+        {
+            var surfaces = room.GetReviewedSurfaces(type).OrderBy(value => value.SurfaceId, StringComparer.Ordinal).ToArray();
+            if (string.IsNullOrWhiteSpace(preferredSurfaceId)) return surfaces;
+            return surfaces.Where(value => string.Equals(value.SurfaceId, preferredSurfaceId, StringComparison.Ordinal)).ToArray();
+        }
+
+        private static RoomSurfaceType SurfaceTypeFor(ContactRequirement requirement) => requirement switch
+        {
+            ContactRequirement.WallBacked or ContactRequirement.WallMounted => RoomSurfaceType.Wall,
+            ContactRequirement.CeilingMounted => RoomSurfaceType.Ceiling,
+            _ => RoomSurfaceType.Floor
+        };
+
+        private static int ContactOrder(ContactRules rules) => rules.requirement switch
+        {
+            ContactRequirement.WallBacked or ContactRequirement.WallMounted => 0,
+            ContactRequirement.FloorSupported => 1,
+            ContactRequirement.CeilingMounted => 2,
+            _ => 3
+        };
+
+        private static float TargetGap(ContactRules rules) => rules.requirement == ContactRequirement.FloorSupported
+            ? rules.minimumGap
+            : (rules.minimumGap + rules.maximumGap) * 0.5f;
 
         private static Vector3 SampleLocalPoint(BoxCollider box, PreferredZone zone, PlacementSurface surface, System.Random random)
         {
@@ -348,6 +422,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             worldBounds = source.worldBounds,
             surfaceId = source.surfaceId,
             contactEvidence = source.contactEvidence,
+            surfaceIds = source.surfaceIds != null ? new List<string>(source.surfaceIds) : new List<string>(),
+            contactEvidenceSet = source.contactEvidenceSet != null ? new List<ContactEvidence>(source.contactEvidenceSet) : new List<ContactEvidence>(),
             locked = source.locked
         };
 
@@ -359,16 +435,20 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             public Bounds Bounds;
             public RoomSurface Surface;
             public ContactEvidence Contact;
+            public IReadOnlyList<RoomSurface> Surfaces;
+            public IReadOnlyList<ContactEvidence> Contacts;
             public float Score;
 
-            public Candidate(Vector3 position, Quaternion rotation, Vector3 scale, Bounds bounds, RoomSurface surface, ContactEvidence contact, float score)
+            public Candidate(Vector3 position, Quaternion rotation, Vector3 scale, Bounds bounds, IReadOnlyList<RoomSurface> surfaces, IReadOnlyList<ContactEvidence> contacts, float score)
             {
                 Position = position;
                 Rotation = rotation;
                 Scale = scale;
                 Bounds = bounds;
-                Surface = surface;
-                Contact = contact;
+                Surfaces = surfaces ?? Array.Empty<RoomSurface>();
+                Contacts = contacts ?? Array.Empty<ContactEvidence>();
+                Surface = Surfaces.Count > 0 ? Surfaces[0] : null;
+                Contact = Contacts.Count > 0 ? Contacts[0] : null;
                 Score = score;
             }
         }

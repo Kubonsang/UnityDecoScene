@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spatial Contract Studio QA Comparison</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 16px; background: #111214; color: #dfe3e7; font-family: Inter, "Segoe UI", "Noto Sans KR", sans-serif; }
+      header { height: 40px; display: flex; align-items: center; justify-content: space-between; }
+      h1 { margin: 0; font-size: 15px; } small { color: #8f949b; }
+      main { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      figure { margin: 0; border: 1px solid #3a3d41; background: #202225; }
+      figcaption { min-height: 34px; display: flex; align-items: center; padding: 7px 11px; border-bottom: 1px solid #3a3d41; color: #c7cbd0; font-size: 11px; }
+      img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #161719; }
+      .notes { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .note { border: 1px solid #313439; padding: 10px; color: #adb2b8; font-size: 10px; line-height: 1.45; }
+      .note strong { display: block; margin-bottom: 3px; color: #e1e4e8; }
+    </style>
+  </head>
+  <body>
+    <header><h1>Agent Spatial Contract Studio — 동일 화면 비교</h1><small>기존 제품 방향 ↔ 신규 사용자 판정형 검수</small></header>
+    <main>
+      <figure><figcaption>기존 기준 · Review Studio</figcaption><img src="/qa/selected-review-studio.png" alt="기존 Review Studio 디자인 기준" /></figure>
+      <figure><figcaption>구현 · Asset Geometry 사용자 검수</figcaption><img src="/qa/implementation-spatial-contract.png" alt="Spatial Contract 사용자 검수 구현" /></figure>
+      <section class="notes">
+        <div class="note"><strong>제품 언어 유지</strong>Unity 스타일의 짙은 표면, 얇은 구분선, 파란 선택 상태와 녹색 안전 상태를 그대로 사용합니다.</div>
+        <div class="note"><strong>판정 권한 분리</strong>기술 게이트는 수치를 표시하고, 실제 승인·수정·판단 불가는 사용자 게이트에서만 처리합니다.</div>
+        <div class="note"><strong>핵심 작업 작동</strong>에셋 선택, 4뷰 전환, 오버레이 토글, 의견 기록, 기술 오류 시 승인 차단이 동작합니다.</div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -33,15 +33,29 @@ const tools = [
     locked: { type: "boolean", default: true }
   }, ["ids"]),
   tool("validate_preview", "Run deterministic technical validation on the active preview.", {}),
-  tool("capture_preview_views", "Capture top, observation, and corner views and return them as images.", {}),
-  tool("submit_visual_review", "Record evidence-based mood, style, story, and composition scores after comparing captures with the concept references.", {
+  tool("capture_preview_views", "Explicit diagnostic only: capture top, observation, and corner views and return image content. Prefer prepare_room_review for the token-light human review workflow.", {}),
+  tool("submit_visual_review", "Store advisory AI mood, style, story, and composition notes. These scores never approve a room and never unlock Apply.", {
     mood: { type: "integer", minimum: 0, maximum: 100 },
     style: { type: "integer", minimum: 0, maximum: 100 },
     story: { type: "integer", minimum: 0, maximum: 100 },
     composition: { type: "integer", minimum: 0, maximum: 100 },
     feedback: { type: "string" }
   }, ["mood", "style", "story", "composition", "feedback"]),
-  tool("discard_preview", "Discard the active non-persistent preview.", {})
+  tool("prepare_room_review", "Run deterministic room validation and prepare or reuse the fixed human-review capture set. Returns only a compact brief and never returns images, approves, or applies.", {}),
+  tool("get_room_review_agent_brief", "Read the compact room-review status and next action without scene hierarchy, transforms, absolute paths, or images.", {}),
+  tool("discard_preview", "Discard the active non-persistent preview.", {}),
+  tool("begin_spatial_calibration", "Open a non-persistent Unity PreviewSceneStage for a reviewed descriptor. This does not approve, apply, or write a contract.", {
+    descriptorAssetPath: { type: "string", description: "Unity asset path to a DecorAssetDescriptor." },
+    template: { type: "string", enum: ["WallMounted", "WallBackedFloorSupported", "FloorSupported", "SupportedBy"] },
+    targetPrefabPath: { type: "string", description: "Required only for SupportedBy." }
+  }, ["descriptorAssetPath", "template"]),
+  tool("inspect_spatial_calibration", "Inspect the active temporary Spatial Calibration session. This is read-only and cannot approve or apply a contract.", {}),
+  tool("capture_spatial_calibration", "Run deterministic validation, create the four human-review captures, and write temporary drafts under Library. This cannot approve or apply a contract.", {}),
+  tool("get_spatial_contract_draft", "Read temporary Spatial Contract drafts for analysis. Drafts are not approved contracts.", {}),
+  tool("submit_spatial_contract_proposal", "Submit a temporary AI suggestion for relation, frames, or tolerances. A proposal cannot pass, approve, apply, or save a tracked contract.", {
+    proposalJson: { type: "string", description: "A JSON proposal describing suggested relation, frames, tolerances, and rationale." }
+  }, ["proposalJson"]),
+  tool("get_deterministic_validation_report", "Run and return the deterministic collision, penetration, gap, support, and direction report. The report is not a human approval.", {})
 ];
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
@@ -62,7 +76,7 @@ async function handle(request) {
       protocolVersion: params.protocolVersion || "2024-11-05",
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "unity-concept-room", version: "0.2.0" },
-      instructions: `Inspect the room and concept, view the catalog, choose only matching reviewed assets, then create a preview. Validate and capture it before refining. Never claim the preview was applied; Apply is available only to the human in Unity. Optional unity-ctx integration: ${genericTools.length ? "connected" : "disconnected"}.`
+      instructions: `Inspect the room and concept, view the catalog, choose only matching reviewed assets, then create a preview. Use prepare_room_review after refinement; it returns a compact status without image tokens. When it says OPEN_REVIEW, stop and wait for the human decision in the local review UI. AI scores are advisory only. AI cannot pass, approve, apply, or write tracked contracts; never claim the preview was applied. Optional unity-ctx integration: ${genericTools.length ? "connected" : "disconnected"}.`
     });
   }
   if (method === "ping") return writeResult(id, {});

@@ -40,6 +40,8 @@ namespace UnityDecoScene.DungeonDecorator
         public string sessionId;
         public string manifestHash;
         public string geometryProfileHash;
+        public string validationVersion;
+        public string reportHash;
         public int seed;
         public List<ValidationIssue> issues = new();
         public VisualQualityScores visualScores = new();

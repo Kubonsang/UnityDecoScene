@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>방 검수</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0d1218;--panel:#151d26;--panel2:#10171f;--line:#334150;--text:#edf3f8;--muted:#9caaba;--blue:#65a9ff;--green:#62d17a;--green-bg:#173c27;--red:#ff7272;--red-bg:#462326;--amber:#ffc05b}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}button,textarea,input{font:inherit}button{color:inherit}
+    header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:16px;padding:15px 22px;background:#0d1218ee;border-bottom:1px solid var(--line);backdrop-filter:blur(10px)}
+    header h1{margin:0;font-size:20px}header p{margin:1px 0 0;color:var(--muted)}.header-actions{margin-left:auto;display:flex;align-items:center;gap:10px}.state-pill{padding:6px 11px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:var(--panel2);font-weight:750}.state-pill.Approved{color:var(--green);border-color:#347f48;background:var(--green-bg)}.state-pill.RevisionRequested,.state-pill.TechnicalFailed{color:var(--red);border-color:#8b3f44;background:var(--red-bg)}
+    .refresh{padding:7px 11px;border:1px solid var(--line);border-radius:8px;background:#1b2632;cursor:pointer}main{max-width:1450px;margin:auto;padding:18px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+    .scope{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;padding:18px 20px}.eyebrow{color:var(--blue);font-size:12px;font-weight:800;letter-spacing:.08em}.scope h2{margin:3px 0 4px;font-size:25px}.scope p{margin:0;color:var(--muted)}.hashes{display:grid;grid-template-columns:repeat(2,minmax(125px,1fr));gap:7px;align-content:start}.hash{padding:7px 9px;border:1px solid #293643;border-radius:7px;background:var(--panel2);color:var(--muted);font-size:12px}.hash b{display:block;color:#d9e6f2;font-family:ui-monospace,monospace}
+    .steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}.step{display:flex;align-items:center;gap:10px;min-height:64px;padding:10px 13px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--muted)}.step strong{display:block;color:var(--text)}.step i{display:grid;width:29px;height:29px;flex:0 0 auto;place-items:center;border:1px solid #536273;border-radius:50%;font-style:normal;font-weight:800}.step.done i{color:#08140c;background:var(--green);border-color:var(--green)}.step.active{border-color:var(--blue)}.step.active i{color:#07111d;background:var(--blue);border-color:var(--blue)}.step.error{border-color:var(--red)}.step.error i{color:#21090a;background:var(--red);border-color:var(--red)}
+    .summary{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:12px;margin-bottom:12px}.section{padding:16px 18px}.section h3{margin:0 0 10px;font-size:17px}.empty{color:var(--muted)}ul{margin:0;padding-left:20px}.changes li,.errors li{margin:5px 0}.errors{color:#ffc1c1}.technical-ok{color:var(--green);font-weight:750}
+    .captures{padding:17px}.captures-head{display:flex;align-items:end;justify-content:space-between;margin-bottom:12px}.captures-head h3{margin:0;font-size:19px}.captures-head p{margin:0;color:var(--muted)}.image-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}figure{margin:0;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#090d12}figure img{display:block;width:100%;aspect-ratio:16/10;object-fit:contain}figcaption{padding:8px 12px;color:#cbd6e1;background:var(--panel2);border-top:1px solid var(--line)}
+    .decision{margin-top:12px;padding:17px}.decision h3{margin:0 0 3px}.decision>p{margin:0 0 13px;color:var(--muted)}.confirm{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);cursor:pointer}.confirm input{width:20px;height:20px;accent-color:var(--blue)}.issues{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}.issue{padding:6px 9px;border:1px solid var(--line);border-radius:999px;background:#19222c;cursor:pointer}.issue:has(input:checked){color:#ffd9d9;border-color:#a64b52;background:#402226}.issue input{margin-right:5px;accent-color:var(--red)}textarea{width:100%;min-height:78px;resize:vertical;padding:10px 12px;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:8px;outline:none}textarea:focus{border-color:var(--blue)}.buttons{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-top:11px}.buttons button{min-height:45px;border:1px solid var(--line);border-radius:9px;background:#202a35;font-weight:800;cursor:pointer}.buttons .approve{color:#f2fff5;border-color:#38844c;background:#256137}.buttons .revise{color:#fff5f5;border-color:#a7464b;background:#842f35}.buttons button:disabled{opacity:.32;cursor:not-allowed}.message{min-height:23px;margin:9px 2px 0;color:var(--muted)}.message.error{color:var(--red)}.final{padding:13px 15px;border:1px solid var(--line);border-radius:9px;background:var(--panel2)}.final strong{color:var(--green)}
+    @media(max-width:900px){.scope,.summary{grid-template-columns:1fr}.steps{grid-template-columns:repeat(2,1fr)}.image-grid{grid-template-columns:1fr}.hashes{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){header{align-items:flex-start;flex-direction:column}.header-actions{margin-left:0}.steps,.buttons,.hashes{grid-template-columns:1fr}main{padding:10px}.scope{padding:15px}}
+  </style>
+</head>
+<body>
+<header><div><h1>방 검수</h1><p>기술 검사는 도구가, 최종 성공 판정은 내가 합니다.</p></div><div class="header-actions"><span id="state-pill" class="state-pill">불러오는 중</span><button id="refresh" class="refresh">새로고침</button></div></header>
+<main id="app"><section class="card section"><p class="empty">Unity에서 준비한 최신 검수 자료를 불러오고 있습니다.</p></section></main>
+<script>
+let state=null,nonce='',busy=false,viewObserver=null;
+const seenViews=new Set();
+const $=selector=>document.querySelector(selector);
+const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const short=value=>String(value||'').slice(0,12)||'-';
+const labels={Pending:'준비 중',TechnicalFailed:'기술 수정 필요',AwaitingHumanReview:'사용자 검수 대기',Approved:'승인됨',RevisionRequested:'수정 필요',UnableToJudge:'판단 불가',Stale:'재검수 필요'};
+const issueOptions=['잘못된 에셋','부자연스러운 배치','충돌·관통 의심','과도한 반복','콘셉트 불일치','조명·가독성','캡처 부족'];
+
+function progressStep(number,title,description,kind=''){
+  return `<div class="step ${kind}"><i>${kind==='done'?'✓':kind==='error'?'!':number}</i><span><strong>${title}</strong>${description}</span></div>`;
+}
+function technicalIssues(){return Array.isArray(state?.technicalIssues)?state.technicalIssues:[]}
+function issueText(value){return typeof value==='string'?value:[value?.code,value?.message].filter(Boolean).join(' · ')}
+function changeText(value){return typeof value==='string'?value:value?.summary||value?.label||value?.scope||JSON.stringify(value)}
+function render(){
+  if(!state)return;
+  const status=state.status||'Pending';
+  const errors=Number(state.technicalErrorCount||0);
+  const awaiting=['AwaitingHumanReview','Stale'].includes(status)&&errors===0;
+  const final=['Approved','RevisionRequested','UnableToJudge'].includes(status);
+  $('#state-pill').className=`state-pill ${status}`;$('#state-pill').textContent=labels[status]||status;
+  const changes=(state.changeSummary||[]).map(value=>`<li>${escapeHtml(changeText(value))}</li>`).join('');
+  const errorRows=technicalIssues().map(value=>`<li>${escapeHtml(issueText(value))}</li>`).join('');
+  const captures=(state.captures||[]).map(value=>`<figure data-view="${escapeHtml(value.view)}" data-required="${value.required!==false?'1':'0'}"><img loading="lazy" src="/api/room-review/image/${encodeURIComponent(value.view)}?hash=${encodeURIComponent(state.captureHash)}" alt="${escapeHtml(value.label)}"><figcaption>${escapeHtml(value.label)}</figcaption></figure>`).join('');
+  const review=state.review;
+  const decisionBlock=final?`<div class="final"><strong>${escapeHtml(labels[review?.decision||status]||status)}</strong><div>${escapeHtml(review?.comment||'판정이 저장되었습니다.')}</div>${review?.issues?.length?`<small>${review.issues.map(escapeHtml).join(' · ')}</small>`:''}</div>`:`
+    <div class="confirm"><span><strong id="view-progress">검수 시점 확인 중</strong><br><small>필수 이미지를 차례로 스크롤해 확인하면 판정 버튼이 열립니다.</small></span></div>
+    <div class="issues">${issueOptions.map(value=>`<label class="issue"><input type="checkbox" name="issue" value="${value}" ${awaiting?'':'disabled'}>${value}</label>`).join('')}</div>
+    <textarea id="comment" placeholder="수정할 위치와 이유, 또는 판단이 어려운 이유를 적어주세요." ${awaiting?'':'disabled'}></textarea>
+    <div class="buttons"><button class="approve" data-decision="Approved" disabled>승인</button><button class="revise" data-decision="RevisionRequested" disabled>수정 필요</button><button data-decision="UnableToJudge" disabled>판단 불가</button></div><p id="message" class="message">${errors?'기술 오류가 있어 사용자 판정을 저장할 수 없습니다.':'이미지를 확인한 뒤 판정을 선택하세요.'}</p>`;
+  $('#app').innerHTML=`
+    <section class="card scope"><div><div class="eyebrow">${escapeHtml(state.targetKind||'ROOM')} REVIEW</div><h2>${escapeHtml(state.targetName||state.roomKey||'현재 방')}</h2><p>검사 범위 · ${escapeHtml(state.profileId||'기본 방 프로필')} · 실행 ${escapeHtml(short(state.runId))}</p></div><div class="hashes"><div class="hash">입력<b>${escapeHtml(short(state.inputHash))}</b></div><div class="hash">기술 검사<b>${escapeHtml(short(state.validationHash))}</b></div><div class="hash">캡처<b>${escapeHtml(short(state.captureHash))}</b></div><div class="hash">상태<b>${escapeHtml(labels[status]||status)}</b></div></div></section>
+    <section class="steps">${progressStep(1,'범위 고정','대상과 규칙 확인','done')}${progressStep(2,'기술 검사',errors?`${errors}개 오류`:'오류 0개',errors?'error':'done')}${progressStep(3,'캡처 확인',state.captures?.length?`${state.captures.length}개 시점`:'캡처 없음',final?'done':awaiting?'active':'')}${progressStep(4,'사용자 판정',labels[status]||status,final?'done':awaiting?'active':'')}</section>
+    <section class="summary"><div class="card section"><h3>이번 검수 범위의 변경</h3>${changes?`<ul class="changes">${changes}</ul>`:'<p class="empty">첫 검수이거나 별도 변경 요약이 없습니다.</p>'}</div><div class="card section"><h3>기술 검사 결과</h3>${errors?`<ul class="errors">${errorRows||`<li>${errors}개의 오류가 있습니다.</li>`}</ul>`:'<p class="technical-ok">결정론적 기술 오류 0개</p>'}</div></section>
+    <section class="card captures"><div class="captures-head"><div><h3>검수 이미지</h3><p>전체 구도와 변경 부위를 직접 확인하세요.</p></div><small>${escapeHtml(String(state.captures?.length||0))}개</small></div><div class="image-grid">${captures||'<p class="empty">표시할 캡처가 없습니다.</p>'}</div></section>
+    <section class="card decision"><h3>내 판정</h3><p>이 판정은 현재 입력·기술 검사·캡처 해시에만 유효합니다.</p>${decisionBlock}</section>`;
+  document.querySelectorAll('[data-decision]').forEach(button=>button.onclick=()=>submitDecision(button.dataset.decision));
+  observeViews();
+}
+function observeViews(){
+  viewObserver?.disconnect();
+  const figures=[...document.querySelectorAll('figure[data-view][data-required="1"]')];
+  viewObserver=new IntersectionObserver(entries=>{for(const entry of entries){if(entry.isIntersecting&&entry.intersectionRatio>=.55)seenViews.add(entry.target.dataset.view)}updateButtons()},{threshold:[.55]});
+  figures.forEach(value=>viewObserver.observe(value));updateButtons();
+}
+function updateButtons(){
+  const required=[...document.querySelectorAll('figure[data-view][data-required="1"]')].map(value=>value.dataset.view);
+  const seen=required.filter(value=>seenViews.has(value)).length;
+  const progress=$('#view-progress');if(progress)progress.textContent=`필수 시점 ${seen}/${required.length} 확인`;
+  const reviewable=['AwaitingHumanReview','Stale'].includes(state?.status);
+  const enabled=required.length>0&&seen===required.length&&!busy&&reviewable&&Number(state.technicalErrorCount||0)===0&&Boolean(nonce);
+  document.querySelectorAll('[data-decision]').forEach(button=>button.disabled=!enabled);
+}
+async function load(){
+  try{
+    const [health,current]=await Promise.all([fetch('/api/health',{cache:'no-store'}),fetch('/api/room-review/current',{cache:'no-store'})]);
+    const healthValue=await health.json();if(!health.ok)throw new Error(healthValue.error||'로컬 검수 서비스에 연결할 수 없습니다.');nonce=healthValue.nonce||'';
+    const stateValue=await current.json();if(!current.ok)throw new Error(stateValue.error||'검수 자료를 불러오지 못했습니다.');if(state&&((state.runId!==stateValue.runId)||(state.captureHash!==stateValue.captureHash)))seenViews.clear();state=stateValue;render();
+  }catch(error){$('#state-pill').textContent='연결 오류';$('#app').innerHTML=`<section class="card section"><h2>검수 자료를 열 수 없습니다</h2><p class="errors">${escapeHtml(error.message)}</p><p class="empty">Unity에서 검수 준비를 다시 실행한 뒤 새로고침하세요.</p></section>`}
+}
+async function submitDecision(decision){
+  if(busy||!state||!nonce)return;
+  const issues=[...document.querySelectorAll('input[name="issue"]:checked')].map(input=>input.value);
+  const comment=String($('#comment')?.value||'').trim();
+  if(decision==='RevisionRequested'&&!issues.length&&!comment){const message=$('#message');message.textContent='수정할 문제를 선택하거나 이유를 적어주세요.';message.className='message error';return}
+  busy=true;updateButtons();const message=$('#message');message.textContent='판정을 안전하게 저장하고 있습니다…';message.className='message';
+  try{
+    const response=await fetch('/api/room-review/decision',{method:'POST',headers:{'Content-Type':'application/json','X-Spatial-Review-Nonce':nonce},body:JSON.stringify({runId:state.runId,inputHash:state.inputHash,validationHash:state.validationHash,captureHash:state.captureHash,decision,issues,comment})});
+    const result=await response.json();if(!response.ok)throw new Error(result.error||'판정을 저장하지 못했습니다.');await load();
+  }catch(error){busy=false;message.textContent=error.message;message.className='message error';updateButtons()}
+}
+$('#refresh').onclick=load;load();
+</script>
+</body>
+</html>

@@ -14,6 +14,7 @@ namespace UnityDecoScene.DungeonDecorator.Tests
     {
         private readonly List<Object> cleanup = new();
         private readonly List<string> assetCleanup = new();
+        private readonly List<string> reviewCleanup = new();
 
         [TearDown]
         public void TearDown()
@@ -21,8 +22,11 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             RoomPreviewManager.DiscardPreview();
             foreach (var item in cleanup.Where(item => item != null)) Object.DestroyImmediate(item);
             foreach (var path in assetCleanup) AssetDatabase.DeleteAsset(path);
+            foreach (var path in reviewCleanup.Where(Directory.Exists)) Directory.Delete(path, true);
+            if (reviewCleanup.Count > 0 && File.Exists(RoomReviewWorkflow.CurrentPath)) File.Delete(RoomReviewWorkflow.CurrentPath);
             cleanup.Clear();
             assetCleanup.Clear();
+            reviewCleanup.Clear();
         }
 
         [Test]
@@ -121,6 +125,75 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void BookcaseSatisfiesWallAndFloorContactsTogether()
+        {
+            var room = CreateRoom();
+            var wallObject = new GameObject("North Wall Surface");
+            cleanup.Add(wallObject);
+            wallObject.transform.SetParent(room.transform, false);
+            var wall = wallObject.AddComponent<RoomSurface>();
+            wall.Configure("wall-north", RoomSurfaceType.Wall, room.AuthoringBounds, new Vector3(0f, 2f, 4f), Vector3.back, Vector3.left, new Vector2(8f, 4f), true);
+            room.RefreshChildren();
+
+            var descriptor = CreateDescriptor("bookcase-dual-contact", "gothic", DecorRole.Hero);
+            descriptor.Geometry.contacts = new List<ContactRules>
+            {
+                new() { ruleId = "floor", frameId = "bottom", requirement = ContactRequirement.FloorSupported, minimumGap = 0f, maximumGap = 0.01f, minimumSupportCoverage = 0.6f },
+                new() { ruleId = "wall", frameId = "back", requirement = ContactRequirement.WallBacked, minimumGap = 0.01f, maximumGap = 0.05f, minimumSupportCoverage = 0.6f }
+            };
+            descriptor.Geometry.Normalize();
+            var catalog = Track(ScriptableObject.CreateInstance<DecorCatalog>());
+            catalog.ReplaceAll(new[] { descriptor });
+            var plan = Track(ScriptableObject.CreateInstance<RoomCompositionPlan>());
+            plan.Configure(room, null, catalog, 17, 0.5f, new[] { new CompositionElement { elementId = "hero", descriptorId = descriptor.AssetId, role = DecorRole.Hero } });
+
+            var result = DeterministicLayoutEngine.Generate(plan);
+
+            Assert.That(result.Placements.Count, Is.EqualTo(1));
+            Assert.That(result.Placements[0].surfaceIds, Is.EqualTo(new[] { "wall-north", "floor-main" }));
+            Assert.That(result.Placements[0].contactEvidenceSet, Has.Count.EqualTo(2));
+            Assert.That(result.Placements[0].contactEvidenceSet.All(value => value.valid), Is.True);
+            var session = new PreviewSession { SessionId = "dual-contact", Plan = plan };
+            session.Placements.Add(result.Placements[0]);
+            var report = PreviewValidationService.Validate(session);
+            Assert.That(report.issues.Any(issue => issue.code is "CONTACT_GAP" or "SURFACE_PENETRATION" or "INSUFFICIENT_SUPPORT" or "CONTACT_DIRECTION"), Is.False);
+        }
+
+        [Test]
+        public void PreferredSurfaceIdConstrainsWallPlacement()
+        {
+            var room = CreateRoom();
+            foreach (var surfaceData in new[]
+                     {
+                         ("wall-north", new Vector3(0f, 2f, 4f), Vector3.back, Vector3.left),
+                         ("wall-east", new Vector3(4f, 2f, 0f), Vector3.left, Vector3.back)
+                     })
+            {
+                var surfaceObject = new GameObject(surfaceData.Item1);
+                cleanup.Add(surfaceObject);
+                surfaceObject.transform.SetParent(room.transform, false);
+                var surface = surfaceObject.AddComponent<RoomSurface>();
+                surface.Configure(surfaceData.Item1, RoomSurfaceType.Wall, room.AuthoringBounds, surfaceData.Item2, surfaceData.Item3, surfaceData.Item4, new Vector2(8f, 4f), true);
+            }
+            room.RefreshChildren();
+            var descriptor = CreateDescriptor("preferred-wall-prop", "gothic", DecorRole.Hero);
+            descriptor.Geometry.contact = ContactRules.Defaults(ContactRequirement.WallMounted);
+            descriptor.Geometry.reviewed = true;
+            var catalog = Track(ScriptableObject.CreateInstance<DecorCatalog>());
+            catalog.ReplaceAll(new[] { descriptor });
+            var plan = Track(ScriptableObject.CreateInstance<RoomCompositionPlan>());
+            plan.Configure(room, null, catalog, 31, 0.5f, new[]
+            {
+                new CompositionElement { elementId = "hero", descriptorId = descriptor.AssetId, role = DecorRole.Hero, preferredSurfaceId = "wall-east" }
+            });
+
+            var result = DeterministicLayoutEngine.Generate(plan);
+
+            Assert.That(result.Placements, Has.Count.EqualTo(1));
+            Assert.That(result.Placements[0].surfaceId, Is.EqualTo("wall-east"));
+        }
+
+        [Test]
         public void SharedSpatialFixtureMatchesObbSatVerdicts()
         {
             var guid = AssetDatabase.FindAssets("spatial_cases").First();
@@ -149,7 +222,7 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
-        public void PreviewApplyCreatesOneDecorationContainerAfterReview()
+        public void PreviewApplyRequiresExplicitHashBoundHumanApproval()
         {
             const string prefabPath = "Assets/__ConceptRoomDecoratorTestPrefab.prefab";
             AssetDatabase.DeleteAsset(prefabPath);
@@ -175,6 +248,26 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             Assert.That(preview.Placements.Count, Is.EqualTo(1));
             Assert.That((preview.Root.hideFlags & HideFlags.DontSaveInEditor) != 0, Is.True);
             RoomPreviewManager.SetVisualReview(new VisualQualityScores { mood = 100, style = 100, story = 100, composition = 100, feedback = "Reviewed in test." });
+            Assert.Throws<InvalidOperationException>(() => RoomPreviewManager.ApplyCurrent(),
+                "Advisory AI scores must never unlock Apply.");
+
+            RoomReviewTestCache.Seed(preview);
+            var run = RoomReviewWorkflow.Prepare(preview, false);
+            Assert.That(run.status, Is.EqualTo(RoomReviewStates.AwaitingHumanReview));
+            run.status = RoomReviewStates.Approved;
+            run.decision = new RoomReviewDecision
+            {
+                value = RoomReviewDecisions.Approved,
+                reviewer = "test-human",
+                reviewedUtc = DateTime.UtcNow.ToString("O"),
+                inputHash = run.inputHash,
+                technicalReportHash = run.technicalReportHash,
+                captureSetHash = run.capture.captureSetHash
+            };
+            var reviewStatePath = RoomReviewWorkflow.StatePathFor(run.targetId);
+            var reviewDirectory = Path.GetDirectoryName(reviewStatePath);
+            if (!string.IsNullOrWhiteSpace(reviewDirectory)) reviewCleanup.Add(reviewDirectory);
+            File.WriteAllText(reviewStatePath, JsonUtility.ToJson(run, true));
 
             var container = RoomPreviewManager.ApplyCurrent();
 

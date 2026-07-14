@@ -36,6 +36,8 @@ namespace UnityDecoScene.DungeonDecorator
     [Serializable]
     public sealed class ContactRules
     {
+        public string ruleId;
+        public string frameId;
         public ContactRequirement requirement = ContactRequirement.FloorSupported;
         [Min(0f)] public float minimumGap;
         [Min(0f)] public float maximumGap = 0.01f;
@@ -69,11 +71,21 @@ namespace UnityDecoScene.DungeonDecorator
         public ContactFrame bottomContact = new() { frameId = "bottom", localNormal = Vector3.down, localTangent = Vector3.right };
         public ContactFrame backContact = new() { frameId = "back", localNormal = Vector3.back, localTangent = Vector3.right };
         public ContactRules contact = ContactRules.Defaults(ContactRequirement.FloorSupported);
+        public List<ContactRules> contacts = new();
         [Range(0f, 1f)] public float inferenceConfidence;
         public bool reviewed;
         public string dependencyHash;
 
         public bool IsUsable => version == ContractVersion && reviewed && collisionProxies != null && collisionProxies.Count > 0;
+
+        public IReadOnlyList<ContactRules> EffectiveContacts
+        {
+            get
+            {
+                if (contacts != null && contacts.Count > 0) return contacts;
+                return contact != null ? new[] { contact } : Array.Empty<ContactRules>();
+            }
+        }
 
         public void Normalize()
         {
@@ -90,12 +102,29 @@ namespace UnityDecoScene.DungeonDecorator
                 if (proxy.localRotation == default) proxy.localRotation = Quaternion.identity;
             }
             contact ??= ContactRules.Defaults(ContactRequirement.FloorSupported);
-            contact.minimumGap = Mathf.Max(0f, contact.minimumGap);
-            contact.maximumGap = Mathf.Max(contact.minimumGap, contact.maximumGap);
-            contact.maximumPenetration = Mathf.Max(0f, contact.maximumPenetration);
-            contact.minimumSupportCoverage = Mathf.Clamp01(contact.minimumSupportCoverage);
+            NormalizeContact(contact);
+            contacts ??= new List<ContactRules>();
+            contacts.RemoveAll(value => value == null);
+            foreach (var rules in contacts) NormalizeContact(rules);
+            if (contacts.Count > 0) contact = contacts[0];
             bottomContact ??= new ContactFrame { frameId = "bottom", localNormal = Vector3.down, localTangent = Vector3.right };
             backContact ??= new ContactFrame { frameId = "back", localNormal = Vector3.back, localTangent = Vector3.right };
+        }
+
+        public ContactFrame FrameFor(ContactRules rules)
+        {
+            if (rules == null) return null;
+            if (string.Equals(rules.frameId, "back", StringComparison.OrdinalIgnoreCase)) return backContact;
+            if (string.Equals(rules.frameId, "bottom", StringComparison.OrdinalIgnoreCase)) return bottomContact;
+            return rules.requirement is ContactRequirement.WallBacked or ContactRequirement.WallMounted ? backContact : bottomContact;
+        }
+
+        private static void NormalizeContact(ContactRules rules)
+        {
+            rules.minimumGap = Mathf.Max(0f, rules.minimumGap);
+            rules.maximumGap = Mathf.Max(rules.minimumGap, rules.maximumGap);
+            rules.maximumPenetration = Mathf.Max(0f, rules.maximumPenetration);
+            rules.minimumSupportCoverage = Mathf.Clamp01(rules.minimumSupportCoverage);
         }
 
         private static Vector3 NormalizeAxis(Vector3 axis, Vector3 fallback) => axis.sqrMagnitude < 0.0001f ? fallback : axis.normalized;

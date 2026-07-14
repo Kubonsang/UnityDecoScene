@@ -106,9 +106,36 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public static ValidationReport ValidateCurrent()
         {
             if (Current == null) return null;
+            SynchronizePreviewTransforms();
             Current.LastValidation = PreviewValidationService.Validate(Current);
             Changed?.Invoke();
             return Current.LastValidation;
+        }
+
+        public static bool SynchronizePreviewTransforms()
+        {
+            if (Current == null) return false;
+            var changed = false;
+            foreach (var placement in Current.Placements)
+            {
+                if (placement?.previewObject == null || placement.descriptor == null) continue;
+                var transform = placement.previewObject.transform;
+                var position = transform.position;
+                var rotation = transform.rotation;
+                var scale = transform.localScale;
+                if (Approximately(placement.position, position) && Approximately(placement.rotation, rotation) && Approximately(placement.scale, scale)) continue;
+                placement.position = position;
+                placement.rotation = rotation;
+                placement.scale = scale;
+                placement.worldBounds = PlacementBoundsUtility.TransformBounds(
+                    new Bounds(placement.descriptor.LocalBoundsCenter, placement.descriptor.LocalBoundsSize),
+                    position,
+                    rotation,
+                    scale);
+                changed = true;
+            }
+            if (changed) Physics.SyncTransforms();
+            return changed;
         }
 
         public static bool SetVisualReview(VisualQualityScores scores)
@@ -128,10 +155,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public static GameObject ApplyCurrent()
         {
             if (Current == null) throw new InvalidOperationException("There is no active preview.");
+            SynchronizePreviewTransforms();
             var report = PreviewValidationService.Validate(Current);
             if (report.HasErrors) throw new InvalidOperationException($"The preview has {report.ErrorCount} technical errors. Resolve them before Apply.");
-            if (!report.MeetsVisualThresholds(Current.Plan.ConceptBrief))
-                throw new InvalidOperationException("Mood, style, story, and composition must each pass the concept brief threshold before Apply.");
+            if (!RoomReviewWorkflow.HasCurrentHumanApproval(Current, report, out var approvalReason))
+                throw new InvalidOperationException($"Human room approval is required before Apply. {approvalReason}");
 
             Undo.IncrementCurrentGroup();
             var undoGroup = Undo.GetCurrentGroup();
@@ -199,6 +227,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             worldBounds = source.worldBounds,
             surfaceId = source.surfaceId,
             contactEvidence = source.contactEvidence,
+            surfaceIds = source.surfaceIds != null ? new List<string>(source.surfaceIds) : new List<string>(),
+            contactEvidenceSet = source.contactEvidenceSet != null ? new List<ContactEvidence>(source.contactEvidenceSet) : new List<ContactEvidence>(),
             locked = true
         };
 
@@ -214,10 +244,21 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             var text = new StringBuilder();
             foreach (var descriptor in plan.Catalog.Assets.Where(value => value?.Geometry != null).OrderBy(value => value.AssetId, StringComparer.Ordinal))
-                text.Append(descriptor.AssetId).Append(':').Append(descriptor.Geometry.dependencyHash).Append(':').Append(descriptor.Geometry.reviewed ? '1' : '0').Append('|');
+            {
+                text.Append(descriptor.AssetId).Append(':').Append(descriptor.Geometry.dependencyHash).Append(':').Append(descriptor.Geometry.reviewed ? '1' : '0');
+                foreach (var rules in descriptor.Geometry.EffectiveContacts)
+                    text.Append(':').Append(rules.ruleId).Append('/').Append(rules.requirement).Append('/').Append(rules.frameId)
+                        .Append('/').Append(rules.minimumGap.ToString("R", CultureInfo.InvariantCulture))
+                        .Append('/').Append(rules.maximumGap.ToString("R", CultureInfo.InvariantCulture));
+                text.Append('|');
+            }
             return Hash128.Compute(text.ToString()).ToString();
         }
 
         private static string Vector(Vector3 value) => string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2:R}", value.x, value.y, value.z);
+
+        private static bool Approximately(Vector3 left, Vector3 right) => (left - right).sqrMagnitude <= 0.00000001f;
+
+        private static bool Approximately(Quaternion left, Quaternion right) => Mathf.Abs(Quaternion.Dot(left, right)) >= 0.999999f;
     }
 }

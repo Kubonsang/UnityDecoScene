@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ScrollView name="window-scroll" mode="Vertical" class="window-scroll">
+    <ui:VisualElement class="hero-card">
+      <ui:Label text="AGENT SPATIAL CONTRACT STUDIO" class="eyebrow" />
+      <ui:Label text="공간 관계를 직접 보여주세요" class="hero-title" />
+      <ui:Label text="오브젝트와 벽을 선택한 뒤, 평소 Unity에서 배치하듯 올바른 자세를 만들어 주세요. 원본 씬과 프리팹은 변경하지 않습니다." class="hero-description" />
+      <ui:VisualElement class="safety-row">
+        <ui:Label text="안전한 임시 스테이지" class="safety-chip" />
+        <ui:Label text="기술 검사 후 캡처" class="safety-chip" />
+        <ui:Label text="최종 판정은 사용자" class="safety-chip" />
+      </ui:VisualElement>
+    </ui:VisualElement>
+    <ui:VisualElement class="stepper">
+      <ui:VisualElement name="stepper-setup" class="step-item step-active"><ui:Label text="1" class="step-number" /><ui:Label text="대상 선택" class="step-label" /></ui:VisualElement>
+      <ui:VisualElement class="step-line" />
+      <ui:VisualElement name="stepper-stage" class="step-item"><ui:Label text="2" class="step-number" /><ui:Label text="정답 자세" class="step-label" /></ui:VisualElement>
+      <ui:VisualElement class="step-line" />
+      <ui:VisualElement name="stepper-validate" class="step-item"><ui:Label text="3" class="step-number" /><ui:Label text="기술 검사" class="step-label" /></ui:VisualElement>
+      <ui:VisualElement class="step-line" />
+      <ui:VisualElement name="stepper-capture" class="step-item"><ui:Label text="4" class="step-number" /><ui:Label text="사용자 검수" class="step-label" /></ui:VisualElement>
+    </ui:VisualElement>
+    <ui:VisualElement name="status-banner" class="status-banner status-neutral">
+      <ui:Label name="status-icon" text="i" class="status-icon" />
+      <ui:VisualElement class="status-copy"><ui:Label name="status-title" text="준비 중" class="status-title" /><ui:Label name="status-message" text="검수할 오브젝트와 관계를 선택하세요." class="status-message" /></ui:VisualElement>
+    </ui:VisualElement>
+    <ui:VisualElement name="setup-card" class="section-card">
+      <ui:VisualElement class="section-heading"><ui:Label text="1" class="section-index" /><ui:VisualElement><ui:Label text="무엇을 어떻게 놓을지 선택" class="section-title" /><ui:Label text="먼저 검수 대상과 공간 관계를 정합니다." class="section-description" /></ui:VisualElement></ui:VisualElement>
+      <ui:VisualElement name="setup-fields" class="field-stack" />
+      <ui:VisualElement name="relationship-help" class="context-card" />
+      <ui:VisualElement name="setup-wall-fields" class="field-stack" />
+      <ui:VisualElement name="setup-target-fields" class="field-stack" />
+      <ui:VisualElement class="button-row"><ui:Button name="start-button" text="안전한 캘리브레이션 시작" class="primary-button grow" /><ui:Button name="discard-button" text="현재 작업 폐기" class="secondary-button" /></ui:VisualElement>
+    </ui:VisualElement>
+    <ui:VisualElement name="session-content" class="session-content">
+      <ui:VisualElement class="section-card">
+        <ui:VisualElement class="section-heading"><ui:Label text="2" class="section-index" /><ui:VisualElement><ui:Label text="Scene View에서 정답 자세 만들기" class="section-title" /><ui:Label text="이동·회전 기즈모로 자연스러운 자세를 보여주세요." class="section-description" /></ui:VisualElement></ui:VisualElement>
+        <ui:VisualElement name="session-summary" class="summary-grid" />
+        <ui:VisualElement name="stage-actions" class="button-wrap" />
+        <ui:VisualElement class="tip-card"><ui:Label text="보라색 화살표는 방 안쪽, 주황색 선은 오브젝트 뒷면입니다. 서로 마주보도록 배치하세요." /></ui:VisualElement>
+      </ui:VisualElement>
+      <ui:Foldout name="geometry-foldout" text="고급 설정 · 충돌 영역(OBB) 보정" value="false" class="advanced-foldout">
+        <ui:Label text="청록색 상자가 실제 모델의 부피를 감싸지 않을 때만 수정하세요." class="foldout-help" />
+        <ui:VisualElement name="geometry-controls" class="field-stack" />
+        <ui:VisualElement class="button-row"><ui:Button name="add-proxy-button" text="충돌 영역 추가" class="secondary-button grow" /><ui:Button name="delete-proxy-button" text="선택 영역 삭제" class="danger-button grow" /></ui:VisualElement>
+      </ui:Foldout>
+      <ui:Foldout name="rules-foldout" text="고급 설정 · 접촉 허용값" value="false" class="advanced-foldout">
+        <ui:Label text="처음에는 안전한 기본값을 사용하세요. 프로젝트 기준이 명확할 때만 변경합니다." class="foldout-help" />
+        <ui:VisualElement name="rules-controls" class="field-stack" />
+      </ui:Foldout>
+      <ui:VisualElement class="section-card">
+        <ui:VisualElement class="section-heading"><ui:Label text="3" class="section-index" /><ui:VisualElement><ui:Label text="기술 검사 후 4뷰 캡처" class="section-title" /><ui:Label text="간격·관통·지지율·방향이 통과해야 캡처할 수 있습니다." class="section-description" /></ui:VisualElement></ui:VisualElement>
+        <ui:VisualElement class="button-row"><ui:Button name="validate-button" text="기술 검사 실행" class="primary-button grow" /><ui:Button name="capture-button" text="4뷰 캡처 만들기" class="success-button grow" /></ui:VisualElement>
+        <ui:VisualElement name="validation-summary" class="validation-summary" />
+        <ui:VisualElement name="validation-results" class="result-list" />
+        <ui:VisualElement name="capture-results" class="capture-results" />
+      </ui:VisualElement>
+    </ui:VisualElement>
+    <ui:Label text="AI는 제안할 수 있지만 계약을 승인하지 않습니다. 최종 성공은 실제 사용자가 캡처를 보고 결정합니다." class="footer-note" />
+  </ui:ScrollView>
+</ui:UXML>

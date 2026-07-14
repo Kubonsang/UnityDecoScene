@@ -145,7 +145,16 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 "validate_preview" => ValidatePreview(),
                 "capture_preview_views" => CapturePreviewViews(),
                 "submit_visual_review" => SubmitVisualReview(Parse<VisualReviewArgs>(argumentsJson)),
+                "prepare_room_review" => PrepareRoomReview(),
+                "get_room_review_agent_brief" => GetRoomReviewAgentBrief(),
+                "verify_room_review" => VerifyRoomReview(Parse<VerifyRoomReviewArgs>(argumentsJson)),
                 "discard_preview" => DiscardPreview(),
+                "begin_spatial_calibration" => BeginSpatialCalibration(Parse<BeginSpatialCalibrationArgs>(argumentsJson)),
+                "inspect_spatial_calibration" => InspectSpatialCalibration(),
+                "capture_spatial_calibration" => CaptureSpatialCalibration(),
+                "get_spatial_contract_draft" => GetSpatialContractDraft(),
+                "submit_spatial_contract_proposal" => SubmitSpatialContractProposal(Parse<SpatialProposalArgs>(argumentsJson)),
+                "get_deterministic_validation_report" => GetDeterministicValidationReport(),
                 _ => BridgeResponse.Fail($"Unknown tool '{tool}'.")
             };
         }
@@ -232,7 +241,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     motifs = item.Motifs.ToArray(),
                     reviewed = item.Reviewed,
                     geometryReviewed = item.Geometry != null && item.Geometry.IsUsable,
-                    contactRequirement = item.Geometry?.contact?.requirement.ToString() ?? string.Empty,
+                    contactRequirement = item.Geometry != null ? string.Join("+", item.Geometry.EffectiveContacts.Select(value => value.requirement.ToString())) : string.Empty,
                     prefabPath = AssetDatabase.GetAssetPath(item.Prefab)
                 }).ToArray();
             return BridgeResponse.Success(new AssetSearchResultDto { assets = matches });
@@ -309,13 +318,128 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             };
             RoomPreviewManager.SetVisualReview(scores);
             var passed = RoomPreviewManager.Current.LastValidation.MeetsVisualThresholds(RoomPreviewManager.Current.Plan.ConceptBrief);
-            return BridgeResponse.Success(new VisualReviewResultDto { passed = passed, scores = scores });
+            return BridgeResponse.Success(new VisualReviewResultDto { passed = passed, advisoryOnly = true, scores = scores });
+        }
+
+        private static BridgeResponse PrepareRoomReview()
+        {
+            if (RoomPreviewManager.Current == null) return BridgeResponse.Fail("There is no active preview.");
+            var run = RoomReviewWorkflow.PrepareCurrent(false);
+            return BridgeResponse.Success(RoomReviewHashUtility.BuildAgentBrief(run));
+        }
+
+        private static BridgeResponse GetRoomReviewAgentBrief()
+        {
+            var brief = RoomReviewWorkflow.GetAgentBrief();
+            return brief == null ? BridgeResponse.Fail("No room review has been prepared.") : BridgeResponse.Success(brief);
+        }
+
+        private static BridgeResponse VerifyRoomReview(VerifyRoomReviewArgs args)
+        {
+            if (args == null) return BridgeResponse.Fail("Review evidence hashes are required.");
+            return BridgeResponse.Success(RoomReviewWorkflow.VerifyCurrent(
+                args.runId,
+                args.inputHash,
+                args.technicalReportHash,
+                args.captureSetHash));
         }
 
         private static BridgeResponse DiscardPreview()
         {
             RoomPreviewManager.DiscardPreview();
             return BridgeResponse.Success(new StatusDto { message = "Preview discarded." });
+        }
+
+        private static BridgeResponse InspectSpatialCalibration()
+        {
+            var session = SpatialCalibrationSession.Current;
+            if (session == null) return BridgeResponse.Fail("No Spatial Calibration session is open. Start one from the Spatial Calibration window.");
+            return BridgeResponse.Success(new SpatialCalibrationInfoDto
+            {
+                sessionId = session.SessionId,
+                subjectName = session.Descriptor?.Prefab != null ? session.Descriptor.Prefab.name : string.Empty,
+                subjectAssetPath = session.Descriptor?.Prefab != null ? AssetDatabase.GetAssetPath(session.Descriptor.Prefab) : string.Empty,
+                targetName = session.TargetPrefab != null ? session.TargetPrefab.name : string.Empty,
+                template = session.Template.ToString(),
+                collisionProxyCount = session.Geometry?.collisionProxies?.Count ?? 0,
+                contactRuleCount = session.Rules.Count,
+                technicalState = session.LastReport?.status ?? SpatialContractStates.Draft,
+                technicalErrorCount = session.LastReport?.error_count ?? 0,
+                captureSetHash = session.CaptureSet?.capture_set_hash ?? string.Empty,
+                draftPaths = session.DraftPaths.ToArray(),
+                hasAgentProposal = !string.IsNullOrWhiteSpace(session.AgentProposalJson)
+            });
+        }
+
+        private static BridgeResponse BeginSpatialCalibration(BeginSpatialCalibrationArgs args)
+        {
+            if (args == null || string.IsNullOrWhiteSpace(args.descriptorAssetPath))
+                return BridgeResponse.Fail("descriptorAssetPath is required.");
+            var descriptor = LoadAsset<DecorAssetDescriptor>(args.descriptorAssetPath);
+            if (descriptor == null || descriptor.Prefab == null)
+                return BridgeResponse.Fail("The requested DecorAssetDescriptor or its prefab was not found.");
+            if (!Enum.TryParse(args.template, true, out SpatialCalibrationTemplate template))
+                return BridgeResponse.Fail("template must be WallMounted, WallBackedFloorSupported, FloorSupported, or SupportedBy.");
+            var target = LoadAsset<GameObject>(args.targetPrefabPath);
+            if (template == SpatialCalibrationTemplate.SupportedBy && target == null)
+                return BridgeResponse.Fail("SupportedBy requires targetPrefabPath.");
+
+            SpatialCalibrationSession.Begin(descriptor, target, template);
+            SpatialCalibrationWindow.Open();
+            return InspectSpatialCalibration();
+        }
+
+        private static BridgeResponse CaptureSpatialCalibration()
+        {
+            var session = SpatialCalibrationSession.Current;
+            if (session == null) return BridgeResponse.Fail("No Spatial Calibration session is open.");
+            var report = SpatialCalibrationValidator.Validate(session);
+            var captures = SpatialCalibrationCaptureService.Capture(session, report);
+            SpatialContractIO.WriteDrafts(session, report, captures);
+            var paths = captures.raw_paths.Concat(captures.evidence_paths).ToArray();
+            return BridgeResponse.Success(new SpatialCaptureResultDto
+            {
+                sessionId = session.SessionId,
+                technicalPassed = report.Passed,
+                technicalErrorCount = report.error_count,
+                reportHash = report.report_hash,
+                captureSetHash = captures.capture_set_hash,
+                rawPaths = captures.raw_paths.ToArray(),
+                evidencePaths = captures.evidence_paths.ToArray(),
+                draftPaths = session.DraftPaths.ToArray()
+            }, paths);
+        }
+
+        private static BridgeResponse GetSpatialContractDraft()
+        {
+            var session = SpatialCalibrationSession.Current;
+            if (session == null) return BridgeResponse.Fail("No Spatial Calibration session is open.");
+            if (session.DraftPaths.Count == 0) return BridgeResponse.Fail("No draft exists. Capture and validate the calibration first.");
+            var drafts = session.DraftPaths.Where(File.Exists).Select(path => new SpatialDraftDto
+            {
+                path = path,
+                json = File.ReadAllText(path)
+            }).ToArray();
+            return BridgeResponse.Success(new SpatialDraftResultDto { drafts = drafts });
+        }
+
+        private static BridgeResponse SubmitSpatialContractProposal(SpatialProposalArgs args)
+        {
+            var session = SpatialCalibrationSession.Current;
+            if (session == null) return BridgeResponse.Fail("No Spatial Calibration session is open.");
+            if (string.IsNullOrWhiteSpace(args?.proposalJson)) return BridgeResponse.Fail("proposalJson is required.");
+            session.AgentProposalJson = args.proposalJson;
+            return BridgeResponse.Success(new StatusDto
+            {
+                message = "Proposal stored in the temporary calibration session. It has not passed, approved, applied, or written any contract."
+            });
+        }
+
+        private static BridgeResponse GetDeterministicValidationReport()
+        {
+            var session = SpatialCalibrationSession.Current;
+            if (session == null) return BridgeResponse.Fail("No Spatial Calibration session is open.");
+            return BridgeResponse.Success(SpatialCalibrationValidator.Validate(session));
         }
 
         private static ConceptRoom FindRoom(string roomId)
@@ -350,6 +474,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 anchorElementId = source.anchorElementId,
                 count = Mathf.Max(1, source.count),
                 preferredZone = zone,
+                preferredSurfaceId = source.preferredSurfaceId,
                 spacing = Mathf.Max(0f, source.spacing),
                 locked = source.locked
             };
@@ -375,8 +500,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class SearchAssetsArgs { public string assetPath; public string query; public string role; public string styleSet; }
         [Serializable] private sealed class LockArgs { public string[] ids; public bool locked = true; }
         [Serializable] private sealed class VisualReviewArgs { public int mood; public int style; public int story; public int composition; public string feedback; }
+        [Serializable] private sealed class SpatialProposalArgs { public string proposalJson; }
+        [Serializable] private sealed class VerifyRoomReviewArgs { public string runId; public string inputHash; public string technicalReportHash; public string captureSetHash; }
+        [Serializable] private sealed class BeginSpatialCalibrationArgs { public string descriptorAssetPath; public string template; public string targetPrefabPath; }
         [Serializable] private sealed class CreatePreviewArgs { public string roomId; public string briefAssetPath; public string catalogAssetPath; public int seed = 12345; public float density = 0.5f; public CompositionElementDto[] elements; }
-        [Serializable] private sealed class CompositionElementDto { public string elementId; public string descriptorId; public string role; public string relation; public string anchorElementId; public int count = 1; public string preferredZone; public float spacing = 1f; public bool locked; }
+        [Serializable] private sealed class CompositionElementDto { public string elementId; public string descriptorId; public string role; public string relation; public string anchorElementId; public int count = 1; public string preferredZone; public string preferredSurfaceId; public float spacing = 1f; public bool locked; }
         [Serializable] private sealed class RoomInfoDto { public string roomId; public string objectName; public Vector3 boundsCenter; public Vector3 boundsSize; public int floorColliderCount; public int surfaceCount; public int reviewedSurfaceCount; public int keepClearZoneCount; public ObservationDto[] observationPoints; }
         [Serializable] private sealed class ObservationDto { public string label; public Vector3 position; public Vector3 forward; public float fieldOfView; public bool primary; }
         [Serializable] private sealed class ConceptBriefDto { public string title; public string roomPurpose; public string occupantsAndFaction; public string storyOrEvidence; public string heroSubject; public string[] moodKeywords; public string[] materialKeywords; public string[] colorKeywords; public string[] requiredMotifs; public string[] forbiddenMotifs; public string[] referenceImagePaths; }
@@ -386,7 +514,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class StatusDto { public string message; }
         [Serializable] private sealed class PreviewResultDto { public string sessionId; public int placementCount; public int assetGapCount; public string manifestHash; public string geometryProfileHash; public int seed; public PlacementDto[] placements; }
         [Serializable] private sealed class PlacementDto { public string placementId; public string elementId; public string assetId; public string role; public Vector3 position; public Vector3 eulerAngles; public Vector3 scale; public bool locked; }
-        [Serializable] private sealed class VisualReviewResultDto { public bool passed; public VisualQualityScores scores; }
+        [Serializable] private sealed class VisualReviewResultDto { public bool passed; public bool advisoryOnly; public VisualQualityScores scores; }
+        [Serializable] private sealed class SpatialCalibrationInfoDto { public string sessionId; public string subjectName; public string subjectAssetPath; public string targetName; public string template; public int collisionProxyCount; public int contactRuleCount; public string technicalState; public int technicalErrorCount; public string captureSetHash; public string[] draftPaths; public bool hasAgentProposal; }
+        [Serializable] private sealed class SpatialCaptureResultDto { public string sessionId; public bool technicalPassed; public int technicalErrorCount; public string reportHash; public string captureSetHash; public string[] rawPaths; public string[] evidencePaths; public string[] draftPaths; }
+        [Serializable] private sealed class SpatialDraftDto { public string path; public string json; }
+        [Serializable] private sealed class SpatialDraftResultDto { public SpatialDraftDto[] drafts; }
 
         [Serializable]
         private sealed class BridgeResponse
