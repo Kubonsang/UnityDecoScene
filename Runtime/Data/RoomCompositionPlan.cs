@@ -14,6 +14,7 @@ namespace UnityDecoScene.DungeonDecorator
         public string anchorElementId;
         [Min(1)] public int count = 1;
         public PreferredZone preferredZone = PreferredZone.Any;
+        public string preferredSurfaceId;
         [Min(0f)] public float spacing = 1f;
         public bool locked;
     }

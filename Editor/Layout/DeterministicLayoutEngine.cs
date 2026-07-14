@@ -147,14 +147,15 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             {
                 var primary = rules[0];
                 var surfaceType = SurfaceTypeFor(primary.requirement);
-                var surfaces = ReviewedSurfaces(room, surfaceType);
+                var surfaces = ReviewedSurfaces(room, surfaceType, element.preferredSurfaceId);
                 if (surfaces.Length == 0) return false;
                 var targetSurface = surfaces[(attempt + instanceIndex) % surfaces.Length];
                 var frame = profile.FrameFor(primary);
                 rotation = SpatialGeometryUtility.AlignContactFrame(profile, primary, targetSurface);
                 if (surfaceType == RoomSurfaceType.Floor) rotation = Quaternion.AngleAxis(yaw, targetSurface.Normal) * rotation;
-                var halfWidth = Mathf.Min(targetSurface.Size.x * 0.45f, Mathf.Max(0f, targetSurface.Size.x * 0.5f - frame.size.x * scalar * 0.5f));
-                var halfHeight = Mathf.Min(targetSurface.Size.y * 0.45f, Mathf.Max(0f, targetSurface.Size.y * 0.5f - frame.size.y * scalar * 0.5f));
+                var edgePadding = Mathf.Max(0.25f, descriptor.Clearance);
+                var halfWidth = Mathf.Max(0f, targetSurface.Size.x * 0.5f - frame.size.x * scalar * 0.5f - edgePadding);
+                var halfHeight = Mathf.Max(0f, targetSurface.Size.y * 0.5f - frame.size.y * scalar * 0.5f - edgePadding);
                 var horizontal = Mathf.Lerp(-halfWidth, halfWidth, (float)random.NextDouble());
                 var vertical = Mathf.Lerp(-halfHeight, halfHeight, (float)random.NextDouble());
                 var surfacePoint = targetSurface.Point(horizontal, vertical);
@@ -216,8 +217,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return false;
         }
 
-        private static RoomSurface[] ReviewedSurfaces(ConceptRoom room, RoomSurfaceType type) =>
-            room.GetReviewedSurfaces(type).OrderBy(value => value.SurfaceId, StringComparer.Ordinal).ToArray();
+        private static RoomSurface[] ReviewedSurfaces(ConceptRoom room, RoomSurfaceType type, string preferredSurfaceId = null)
+        {
+            var surfaces = room.GetReviewedSurfaces(type).OrderBy(value => value.SurfaceId, StringComparer.Ordinal).ToArray();
+            if (string.IsNullOrWhiteSpace(preferredSurfaceId)) return surfaces;
+            return surfaces.Where(value => string.Equals(value.SurfaceId, preferredSurfaceId, StringComparison.Ordinal)).ToArray();
+        }
 
         private static RoomSurfaceType SurfaceTypeFor(ContactRequirement requirement) => requirement switch
         {

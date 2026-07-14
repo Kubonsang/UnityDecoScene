@@ -156,6 +156,40 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void PreferredSurfaceIdConstrainsWallPlacement()
+        {
+            var room = CreateRoom();
+            foreach (var surfaceData in new[]
+                     {
+                         ("wall-north", new Vector3(0f, 2f, 4f), Vector3.back, Vector3.left),
+                         ("wall-east", new Vector3(4f, 2f, 0f), Vector3.left, Vector3.back)
+                     })
+            {
+                var surfaceObject = new GameObject(surfaceData.Item1);
+                cleanup.Add(surfaceObject);
+                surfaceObject.transform.SetParent(room.transform, false);
+                var surface = surfaceObject.AddComponent<RoomSurface>();
+                surface.Configure(surfaceData.Item1, RoomSurfaceType.Wall, room.AuthoringBounds, surfaceData.Item2, surfaceData.Item3, surfaceData.Item4, new Vector2(8f, 4f), true);
+            }
+            room.RefreshChildren();
+            var descriptor = CreateDescriptor("preferred-wall-prop", "gothic", DecorRole.Hero);
+            descriptor.Geometry.contact = ContactRules.Defaults(ContactRequirement.WallMounted);
+            descriptor.Geometry.reviewed = true;
+            var catalog = Track(ScriptableObject.CreateInstance<DecorCatalog>());
+            catalog.ReplaceAll(new[] { descriptor });
+            var plan = Track(ScriptableObject.CreateInstance<RoomCompositionPlan>());
+            plan.Configure(room, null, catalog, 31, 0.5f, new[]
+            {
+                new CompositionElement { elementId = "hero", descriptorId = descriptor.AssetId, role = DecorRole.Hero, preferredSurfaceId = "wall-east" }
+            });
+
+            var result = DeterministicLayoutEngine.Generate(plan);
+
+            Assert.That(result.Placements, Has.Count.EqualTo(1));
+            Assert.That(result.Placements[0].surfaceId, Is.EqualTo("wall-east"));
+        }
+
+        [Test]
         public void SharedSpatialFixtureMatchesObbSatVerdicts()
         {
             var guid = AssetDatabase.FindAssets("spatial_cases").First();

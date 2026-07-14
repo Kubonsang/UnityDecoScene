@@ -448,6 +448,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 anchorElementId = source.anchorElementId,
                 count = Mathf.Max(1, source.count),
                 preferredZone = zone,
+                preferredSurfaceId = source.preferredSurfaceId,
                 spacing = Mathf.Max(0f, source.spacing),
                 locked = source.locked
             };
@@ -476,7 +477,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class SpatialProposalArgs { public string proposalJson; }
         [Serializable] private sealed class BeginSpatialCalibrationArgs { public string descriptorAssetPath; public string template; public string targetPrefabPath; }
         [Serializable] private sealed class CreatePreviewArgs { public string roomId; public string briefAssetPath; public string catalogAssetPath; public int seed = 12345; public float density = 0.5f; public CompositionElementDto[] elements; }
-        [Serializable] private sealed class CompositionElementDto { public string elementId; public string descriptorId; public string role; public string relation; public string anchorElementId; public int count = 1; public string preferredZone; public float spacing = 1f; public bool locked; }
+        [Serializable] private sealed class CompositionElementDto { public string elementId; public string descriptorId; public string role; public string relation; public string anchorElementId; public int count = 1; public string preferredZone; public string preferredSurfaceId; public float spacing = 1f; public bool locked; }
         [Serializable] private sealed class RoomInfoDto { public string roomId; public string objectName; public Vector3 boundsCenter; public Vector3 boundsSize; public int floorColliderCount; public int surfaceCount; public int reviewedSurfaceCount; public int keepClearZoneCount; public ObservationDto[] observationPoints; }
         [Serializable] private sealed class ObservationDto { public string label; public Vector3 position; public Vector3 forward; public float fieldOfView; public bool primary; }
         [Serializable] private sealed class ConceptBriefDto { public string title; public string roomPurpose; public string occupantsAndFaction; public string storyOrEvidence; public string heroSubject; public string[] moodKeywords; public string[] materialKeywords; public string[] colorKeywords; public string[] requiredMotifs; public string[] forbiddenMotifs; public string[] referenceImagePaths; }
