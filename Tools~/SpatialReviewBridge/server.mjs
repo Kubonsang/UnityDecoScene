@@ -6,6 +6,7 @@ import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execute = promisify(execFile);
@@ -15,6 +16,10 @@ const sessionPath = path.join(projectRoot, "Library", "DungeonDecorator", "sessi
 const workflowRoot = path.join(projectRoot, "Library", "DungeonDecorator", "CalibrationWorkflow");
 const workflowStatePath = path.join(workflowRoot, "state.json");
 const workflowPagePath = path.join(workflowRoot, "review.html");
+const roomReviewsRoot = path.join(projectRoot, "Library", "DungeonDecorator", "RoomReviews");
+const roomReviewPointerPath = path.join(roomReviewsRoot, "current.json");
+const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
+const roomReviewPagePath = path.resolve(serverDirectory, "..", "..", "Editor", "Review", "Templates", "RoomReviewTemplate.html");
 const unityCtx = process.env.UNITY_CTX_BIN || "unity-ctx";
 const reviewNonce = crypto.randomBytes(24).toString("hex");
 const port = Number(process.env.SPATIAL_REVIEW_PORT || 4174);
@@ -25,8 +30,12 @@ const allowedOrigins = new Set([
   `http://localhost:${port}`,
   `http://127.0.0.1:${port}`,
 ]);
+const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
 
 const server = http.createServer(async (request, response) => {
+  if (!allowedHosts.has(String(request.headers.host || "").toLowerCase())) {
+    return send(response, 403, { error: "Host is not allowed." });
+  }
   const origin = request.headers.origin || "";
   const requestUrl = new URL(request.url || "/", `http://127.0.0.1:${port}`);
   if (origin && !allowedOrigins.has(origin)) return send(response, 403, { error: "Origin is not allowed." });
@@ -44,7 +53,6 @@ const server = http.createServer(async (request, response) => {
         connected: fs.existsSync(sessionPath),
         workflowAvailable: fs.existsSync(workflowStatePath),
         nonce: reviewNonce,
-        projectRoot,
       });
     }
     if (request.method === "GET" && requestUrl.pathname === "/workflow") {
@@ -54,8 +62,37 @@ const server = http.createServer(async (request, response) => {
       response.setHeader("Cache-Control", "no-store");
       return response.end(fs.readFileSync(workflowPagePath));
     }
+    if (request.method === "GET" && requestUrl.pathname === "/room-review") {
+      if (!fs.existsSync(roomReviewPagePath)) throw new Error("Room review page is not available.");
+      response.statusCode = 200;
+      response.setHeader("Content-Type", "text/html; charset=utf-8");
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+      response.setHeader("Referrer-Policy", "no-referrer");
+      response.setHeader("X-Content-Type-Options", "nosniff");
+      return response.end(fs.readFileSync(roomReviewPagePath));
+    }
     if (request.method === "GET" && requestUrl.pathname === "/api/spatial/workflow") {
       return send(response, 200, loadWorkflow());
+    }
+    if (request.method === "GET" && requestUrl.pathname === "/api/room-review/current") {
+      const { pointer, state } = loadCurrentRoomReview();
+      return send(response, 200, publicRoomReviewState(state, pointer.roomKey));
+    }
+    if (request.method === "GET" && requestUrl.pathname.startsWith("/api/room-review/image/")) {
+      const view = decodeURIComponent(requestUrl.pathname.slice("/api/room-review/image/".length));
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(view)) throw new Error("Unsupported room review view.");
+      const { state, statePath } = loadCurrentRoomReview();
+      const captureHash = roomCaptureHash(state);
+      if (!captureHash || requestUrl.searchParams.get("hash") !== captureHash) throw new Error("Room capture hash is stale.");
+      const capture = (state.capture?.views || []).find(value => value && value.id === view);
+      if (!capture || !capture.imagePath) throw new Error("Room review capture was not found.");
+      const filePath = verifyRoomReviewCapture(capture, statePath);
+      response.statusCode = 200;
+      response.setHeader("Content-Type", "image/png");
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("X-Content-Type-Options", "nosniff");
+      return response.end(fs.readFileSync(filePath));
     }
     if (request.method === "GET" && requestUrl.pathname.startsWith("/api/spatial/workflow/image/")) {
       const parts = requestUrl.pathname.slice("/api/spatial/workflow/image/".length).split("/");
@@ -112,6 +149,11 @@ const server = http.createServer(async (request, response) => {
       requireNonce(request);
       const body = await readJson(request);
       return send(response, 200, await reviewWorkflowBatch(body));
+    }
+    if (request.method === "POST" && requestUrl.pathname === "/api/room-review/decision") {
+      requireNonce(request);
+      const body = await readJson(request);
+      return send(response, 200, await reviewCurrentRoom(body));
     }
     return send(response, 404, { error: "Not found." });
   } catch (error) {
@@ -210,6 +252,211 @@ async function reviewWorkflowBatch(body) {
   return { status: "Approved", count: results.length, results };
 }
 
+async function reviewCurrentRoom(body) {
+  const decision = String(body.decision || "");
+  if (!["Approved", "RevisionRequested", "UnableToJudge"].includes(decision)) {
+    throw new Error("Unsupported human decision.");
+  }
+
+  const { state, statePath } = loadCurrentRoomReview();
+  if (!["AwaitingHumanReview", "Stale"].includes(state.status)) throw new Error(`Room review is not awaiting a decision: ${state.status}`);
+  if (technicalErrorCount(state) !== 0) throw new Error("A room review with technical errors cannot be approved or decided.");
+  const expectedHashes = {
+    runId: state.runId,
+    inputHash: state.inputHash,
+    validationHash: state.technicalReportHash,
+    captureHash: roomCaptureHash(state),
+  };
+  for (const [field, expectedValue] of Object.entries(expectedHashes)) {
+    const expected = String(expectedValue || "");
+    const actual = String(body[field] || "");
+    if (!expected || actual !== expected) throw new Error(`Room review ${field} is stale.`);
+  }
+  if (!Array.isArray(state.capture?.views) || state.capture.views.length === 0) throw new Error("Room review captures are missing.");
+  for (const capture of state.capture.views) verifyRoomReviewCapture(capture, statePath);
+
+  const response = await callUnity("verify_room_review", {
+    runId: state.runId,
+    inputHash: state.inputHash,
+    technicalReportHash: state.technicalReportHash,
+    captureSetHash: roomCaptureHash(state),
+  });
+  const verification = resultOf(response);
+  if (!verification.valid) throw new Error(`Unity rejected stale room evidence: ${verification.reason || "verification failed"}`);
+
+  const issues = normalizeIssues(body.issues);
+  const comment = cleanText(body.comment, 4000, "comment");
+  if (decision === "RevisionRequested" && issues.length === 0 && !comment) {
+    throw new Error("RevisionRequested requires at least one issue or a comment.");
+  }
+
+  const reviewedUtc = new Date().toISOString();
+  state.decision = {
+    value: decision,
+    inputHash: state.inputHash,
+    technicalReportHash: state.technicalReportHash,
+    captureSetHash: roomCaptureHash(state),
+    reviewer: "local-user",
+    issueCodes: issues,
+    comment,
+    reviewedUtc,
+  };
+  state.status = decision;
+  state.updatedUtc = reviewedUtc;
+  const reviewPath = path.join(path.dirname(statePath), "runs", state.runId, "human-review.json");
+  if (!inside(roomReviewsRoot, reviewPath)) throw new Error("Room review record path is invalid.");
+  atomicJson(reviewPath, state.decision);
+  atomicJson(statePath, state);
+  return {
+    runId: state.runId,
+    status: state.status,
+    inputHash: state.inputHash,
+    validationHash: state.technicalReportHash,
+    captureHash: roomCaptureHash(state),
+    reviewedUtc,
+  };
+}
+
+function loadCurrentRoomReview() {
+  if (!fs.existsSync(roomReviewPointerPath)) throw new Error("No current room review has been prepared in Unity.");
+  const pointer = JSON.parse(fs.readFileSync(roomReviewPointerPath, "utf8"));
+  if (pointer.schemaVersion !== 1) throw new Error("Unsupported current room review pointer.");
+  const roomKey = String(pointer.roomKey || "");
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(roomKey)) throw new Error("Current room review key is invalid.");
+  if (!String(pointer.statePath || "")) throw new Error("Current room review pointer has no statePath.");
+
+  const expectedPath = path.join(roomReviewsRoot, roomKey, "state.json");
+  const suppliedPath = String(pointer.statePath);
+  const candidates = path.isAbsolute(suppliedPath)
+    ? [path.resolve(suppliedPath)]
+    : [path.resolve(roomReviewsRoot, suppliedPath), path.resolve(projectRoot, suppliedPath)];
+  const candidate = candidates.find(value => samePath(value, expectedPath)) || candidates[0];
+  if (!inside(roomReviewsRoot, candidate) || !samePath(candidate, expectedPath)) {
+    throw new Error("Current room review state must be the selected room's state.json under RoomReviews.");
+  }
+  if (!fs.existsSync(candidate)) throw new Error("Current room review state is missing.");
+  ensureRealPathInside(roomReviewsRoot, candidate);
+
+  const state = JSON.parse(fs.readFileSync(candidate, "utf8"));
+  if (state.schemaVersion !== 1) throw new Error("Unsupported room review state.");
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(String(state.runId || ""))) throw new Error("Room review runId is invalid.");
+  if (state.roomKey && state.roomKey !== roomKey) throw new Error("Room review state does not match the current room pointer.");
+  if (!String(state.inputHash || "").trim()) throw new Error("Room review inputHash is missing.");
+  if (!String(state.technicalReportHash || "").trim()) throw new Error("Room review technicalReportHash is missing.");
+  if (!Number.isInteger(Number(state.technicalErrorCount)) || Number(state.technicalErrorCount) < 0) {
+    throw new Error("Room review technicalErrorCount is invalid.");
+  }
+  const evidenceRequired = ["AwaitingHumanReview", "Approved", "RevisionRequested", "UnableToJudge", "Stale"].includes(state.status);
+  if (evidenceRequired && !String(roomCaptureHash(state) || "").trim()) throw new Error("Room review captureSetHash is missing.");
+  if (evidenceRequired && !Array.isArray(state.capture?.views)) throw new Error("Room review captures are invalid.");
+  return { pointer, state, statePath: candidate };
+}
+
+function publicRoomReviewState(state, roomKey) {
+  return {
+    schemaVersion: state.schemaVersion,
+    roomKey,
+    runId: state.runId,
+    targetKind: state.targetKind || "Room",
+    targetId: state.targetId || "",
+    targetName: state.targetName || roomKey || "Room",
+    profileId: "기본 방 검수 · 4뷰",
+    status: state.status || "Pending",
+    createdUtc: state.createdUtc || "",
+    updatedUtc: state.updatedUtc || "",
+    inputHash: state.inputHash,
+    validationHash: state.technicalReportHash,
+    captureHash: roomCaptureHash(state),
+    technicalErrorCount: technicalErrorCount(state),
+    technicalIssues: Array.isArray(state.technicalErrorCodes) ? state.technicalErrorCodes : [],
+    changeSummary: roomChangeSummary(state.changes),
+    changeScope: state.changes?.scope ?? 0,
+    captures: (state.capture?.views || []).map(capture => ({
+      view: String(capture?.id || ""),
+      label: roomCaptureLabel(capture?.id),
+      required: capture?.required !== false,
+    })),
+    review: state.decision && state.decision.value && state.decision.value !== "Pending" ? {
+      decision: state.decision.value,
+      reviewer: state.decision.reviewer || "local-user",
+      reviewedUtc: state.decision.reviewedUtc || "",
+      issues: Array.isArray(state.decision.issueCodes) ? state.decision.issueCodes : [],
+      comment: state.decision.comment || "",
+    } : null,
+  };
+}
+
+function resolveRoomReviewCapture(capturePath, statePath) {
+  if (!String(capturePath || "")) throw new Error("Room review capture path is missing.");
+  const candidate = path.isAbsolute(capturePath)
+    ? path.resolve(capturePath)
+    : path.resolve(path.dirname(statePath), capturePath);
+  const dungeonDataRoot = path.join(projectRoot, "Library", "DungeonDecorator");
+  if (!inside(dungeonDataRoot, candidate) || path.extname(candidate).toLowerCase() !== ".png" || !fs.existsSync(candidate)) {
+    throw new Error("Room review capture is outside the project review data or is missing.");
+  }
+  ensureRealPathInside(dungeonDataRoot, candidate);
+  return candidate;
+}
+
+function verifyRoomReviewCapture(capture, statePath) {
+  const filePath = resolveRoomReviewCapture(capture?.imagePath, statePath);
+  const expected = String(capture?.contentHash || "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(expected)) throw new Error("Room review capture content hash is invalid.");
+  const actual = crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+  if (actual !== expected) throw new Error("Room review capture content has changed and must be recaptured.");
+  return filePath;
+}
+
+function ensureRealPathInside(root, candidate) {
+  const realRoot = fs.realpathSync(root);
+  const realCandidate = fs.realpathSync(candidate);
+  if (!inside(realRoot, realCandidate)) throw new Error("Room review path escapes the local review data root.");
+}
+
+function technicalErrorCount(state) {
+  return Number(state.technicalErrorCount || 0);
+}
+
+function roomCaptureHash(state) {
+  return String(state.capture?.captureSetHash || "");
+}
+
+function roomCaptureLabel(id) {
+  return ({ top: "상단", entrance: "입구 시점", "primary-observation": "입구 시점", "corner-a": "첫 번째 모서리", "corner-b": "두 번째 모서리" })[id]
+    || String(id || "캡처");
+}
+
+function roomChangeSummary(changes) {
+  const scope = Number(changes?.scope || 0);
+  const labels = [
+    [1, "방 구조"], [2, "구성 계획"], [4, "오브젝트 배치"], [8, "에셋·공간 계약"],
+    [16, "콘셉트"], [32, "기술 검사 규칙"], [64, "캡처 방식"], [128, "조명·표현"],
+  ].filter(([flag]) => (scope & flag) !== 0).map(([, label]) => `${label} 변경`);
+  const affected = Array.isArray(changes?.affectedIds) ? changes.affectedIds : [];
+  const visible = affected.slice(0, 12).map(value => `영향 항목 · ${value}`);
+  if (affected.length > visible.length) visible.push(`그 외 ${affected.length - visible.length}개 항목`);
+  return [...labels, ...visible];
+}
+
+function normalizeIssues(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > 16) throw new Error("issues must be an array with at most 16 entries.");
+  return [...new Set(value.map(item => cleanText(item, 120, "issue")).filter(Boolean))];
+}
+
+function cleanText(value, limit, field) {
+  const result = String(value || "").trim();
+  if (result.length > limit) throw new Error(`${field} is too long.`);
+  return result;
+}
+
+function samePath(left, right) {
+  const a = path.resolve(left);
+  const b = path.resolve(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 function loadWorkflow() {
   if (!fs.existsSync(workflowStatePath)) throw new Error("Calibration workflow has not been created in Unity.");
   const state = JSON.parse(fs.readFileSync(workflowStatePath, "utf8"));
@@ -278,7 +525,9 @@ function callUnity(tool, args) {
 }
 
 function requireNonce(request) {
-  if (request.headers["x-spatial-review-nonce"] !== reviewNonce) throw new Error("Invalid review nonce.");
+  const supplied = Buffer.from(String(request.headers["x-spatial-review-nonce"] || ""));
+  const expected = Buffer.from(reviewNonce);
+  if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) throw new Error("Invalid review nonce.");
 }
 
 function resultOf(response) {
@@ -309,5 +558,7 @@ function send(response, status, body) {
   response.statusCode = status;
   if (body == null) return response.end();
   response.setHeader("Content-Type", "application/json; charset=utf-8");
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("X-Content-Type-Options", "nosniff");
   response.end(JSON.stringify(body));
 }

@@ -22,9 +22,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private void OnEnable()
         {
             RoomPreviewManager.Changed += Repaint;
+            RoomReviewWorkflow.Changed += Repaint;
             unityCtxAvailable = DetectUnityCtx();
         }
-        private void OnDisable() => RoomPreviewManager.Changed -= Repaint;
+        private void OnDisable()
+        {
+            RoomPreviewManager.Changed -= Repaint;
+            RoomReviewWorkflow.Changed -= Repaint;
+        }
 
         private void OnGUI()
         {
@@ -236,31 +241,78 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     }
                 }
 
-                EditorGUILayout.Space(6f);
-                EditorGUILayout.LabelField("Visual Review", EditorStyles.boldLabel);
-                var scores = report.visualScores;
-                scores.mood = EditorGUILayout.IntSlider("Mood", scores.mood, 0, 100);
-                scores.style = EditorGUILayout.IntSlider("Style", scores.style, 0, 100);
-                scores.story = EditorGUILayout.IntSlider("Story", scores.story, 0, 100);
-                scores.composition = EditorGUILayout.IntSlider("Composition", scores.composition, 0, 100);
-                EditorGUILayout.LabelField("Feedback");
-                scores.feedback = EditorGUILayout.TextArea(scores.feedback ?? string.Empty, GUILayout.MinHeight(45f));
-                if (GUILayout.Button(scores.reviewed ? "Update Visual Review" : "Submit Visual Review"))
+            }
+
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("사용자 룸 검수", EditorStyles.boldLabel);
+            var review = current != null ? RoomReviewWorkflow.GetDisplayState(current) : null;
+            DrawReviewProgress(review, report);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUI.DisabledScope(current == null))
                 {
-                    RoomPreviewManager.SetVisualReview(scores);
-                    status = report.MeetsVisualThresholds(current.Plan.ConceptBrief)
-                        ? "All visual quality thresholds passed."
-                        : "Visual review saved; one or more quality thresholds are still below the brief minimum.";
+                    if (GUILayout.Button(review == null ? "현재 방 검사 시작" : "현재 방 검사 / 계속", GUILayout.Height(30f))) RunSafe(() =>
+                    {
+                        var prepared = RoomReviewWorkflow.PrepareCurrent(true);
+                        status = prepared.status == RoomReviewStates.TechnicalFailed
+                            ? $"기술 오류 {prepared.technicalErrorCount}개가 있어 캡처와 사용자 검수를 중단했습니다."
+                            : prepared.status == RoomReviewStates.Approved
+                                ? "변경 사항이 없어 기존 캡처와 사용자 승인을 그대로 재사용했습니다."
+                                : "기술 검사를 통과했습니다. 브라우저에서 네 시점을 확인하고 판정해 주세요.";
+                    });
+                }
+                using (new EditorGUI.DisabledScope(review == null || review.technicalErrorCount > 0 || review.capture?.views == null || review.capture.views.Count == 0))
+                {
+                    if (GUILayout.Button("검수 화면 열기", GUILayout.Height(30f))) RunSafe(RoomReviewWorkflow.OpenReview);
                 }
             }
 
-            using (new EditorGUI.DisabledScope(current == null || report == null || report.HasErrors || !report.MeetsVisualThresholds(current.Plan.ConceptBrief)))
+            var approved = current != null && report != null && !report.HasErrors && review != null && RoomReviewHashUtility.IsCurrentApproval(review);
+            using (new EditorGUI.DisabledScope(!approved))
             {
-                if (GUILayout.Button("Apply Reviewed Preview", GUILayout.Height(32f))) RunSafe(() =>
+                if (GUILayout.Button("승인된 배치 적용", GUILayout.Height(34f))) RunSafe(() =>
                 {
                     var container = RoomPreviewManager.ApplyCurrent();
-                    status = $"Applied decoration to {container.name}. Use Undo to revert the entire operation.";
+                    status = $"{container.name} 배치를 적용했습니다. 전체 작업은 Undo 한 번으로 되돌릴 수 있습니다.";
                 });
+            }
+        }
+
+        private static void DrawReviewProgress(RoomReviewRun review, ValidationReport report)
+        {
+            var technicalPassed = report != null && !report.HasErrors;
+            var humanApproved = review != null && RoomReviewHashUtility.IsCurrentApproval(review);
+            var waiting = review != null && review.status is RoomReviewStates.AwaitingHumanReview or RoomReviewStates.Stale or RoomReviewStates.RevisionRequested or RoomReviewStates.UnableToJudge;
+            EditorGUILayout.LabelField($"준비 {(review != null ? "✓" : "○")}   →   기술 {(technicalPassed ? "✓" : report == null ? "○" : "✕")}   →   사용자 {(humanApproved ? "✓" : waiting ? "대기" : "○")}   →   적용 {(humanApproved ? "가능" : "잠김")}", EditorStyles.wordWrappedLabel);
+            if (review == null)
+            {
+                EditorGUILayout.HelpBox("검사를 시작하면 충돌을 먼저 확인하고, 통과한 경우에만 사람용 4뷰를 준비합니다.", MessageType.Info);
+                return;
+            }
+            if (review.status == RoomReviewStates.TechnicalFailed)
+            {
+                EditorGUILayout.HelpBox("기술 오류가 있어 사용자 승인을 요청하지 않았습니다. 위 오류를 고친 뒤 다시 검사하세요.", MessageType.Error);
+                return;
+            }
+            if (review.status == RoomReviewStates.Stale)
+                EditorGUILayout.HelpBox("승인 이후 방 또는 배치가 변경되어 이전 승인이 만료되었습니다. 새 캡처를 검수해야 합니다.", MessageType.Warning);
+            else if (review.status == RoomReviewStates.RevisionRequested)
+                EditorGUILayout.HelpBox("사용자가 수정을 요청했습니다. 배치를 고친 뒤 다시 검사하세요.", MessageType.Warning);
+            else if (review.status == RoomReviewStates.UnableToJudge)
+                EditorGUILayout.HelpBox("현재 캡처만으로 판단하기 어렵습니다. 카메라나 장면을 조정한 뒤 다시 검사하세요.", MessageType.Warning);
+            else if (humanApproved)
+                EditorGUILayout.HelpBox("현재 입력·기술 보고서·캡처 해시에 대한 사용자 승인이 저장되었습니다.", MessageType.Info);
+            else
+                EditorGUILayout.HelpBox("브라우저에서 상단·입구·코너 2개 시점을 확인한 뒤 승인 여부를 정하세요.", MessageType.Info);
+
+            if (review.changes?.HasChanges == true)
+            {
+                var scopes = Enum.GetValues(typeof(RoomReviewChangeScope)).Cast<RoomReviewChangeScope>()
+                    .Where(value => value != RoomReviewChangeScope.None && value != RoomReviewChangeScope.All && (review.changes.scope & value) != 0)
+                    .Select(value => value.ToString());
+                EditorGUILayout.LabelField($"변경 범위: {string.Join(", ", scopes)}", EditorStyles.wordWrappedLabel);
+                if ((review.changes.affectedIds?.Length ?? 0) > 0)
+                    EditorGUILayout.LabelField($"영향 대상: {string.Join(", ", review.changes.affectedIds.Take(8))}", EditorStyles.wordWrappedMiniLabel);
             }
         }
 

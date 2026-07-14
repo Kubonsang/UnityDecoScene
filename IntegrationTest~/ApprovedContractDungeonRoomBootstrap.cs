@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -16,7 +14,6 @@ public static class ApprovedContractDungeonRoomBootstrap
 {
     private const string DataRoot = "Assets/ApprovedContractRoomPreview";
     private const string ScenePath = "Assets/Scenes/ApprovedContract_DungeonRoom.unity";
-    private const string OutputRelative = "Library/DungeonDecorator/ApprovedRoomPreview";
     private const string StyleSet = "kaykit-dungeon";
     private const int ExpectedPlacements = 9;
 
@@ -24,7 +21,7 @@ public static class ApprovedContractDungeonRoomBootstrap
     public static void BuildFromMenu()
     {
         Build();
-        Application.OpenURL(new Uri(Path.Combine(OutputDirectory(), "review.html")).AbsoluteUri);
+        RoomReviewWorkflow.OpenReview();
     }
 
     public static void BuildForBatch()
@@ -114,10 +111,10 @@ public static class ApprovedContractDungeonRoomBootstrap
         AddPreviewTorchLights(preview);
         ConfigurePresentationLighting();
         EditorSceneManager.SaveScene(scene, ScenePath);
-        var captures = RoomCaptureService.CaptureAll(preview);
-        WriteReview(preview, report, captures);
+        var review = RoomReviewWorkflow.Prepare(preview);
         Selection.activeGameObject = preview.Root;
-        Debug.Log($"[ApprovedRoomPreview] seed={chosenPlan.Seed} placements={preview.Placements.Count} errors={report.ErrorCount} review={Path.Combine(OutputDirectory(), "review.html")}");
+        Debug.Log($"[ApprovedRoomPreview] seed={chosenPlan.Seed} placements={preview.Placements.Count} " +
+                  $"errors={review.technicalErrorCount} status={review.status} review={review.reviewUrl}");
     }
 
     private static ConceptRoom BuildRoomShell()
@@ -294,39 +291,6 @@ public static class ApprovedContractDungeonRoomBootstrap
         RenderSettings.ambientIntensity = 0.7f;
     }
 
-    private static void WriteReview(PreviewSession preview, ValidationReport report, IReadOnlyList<string> captures)
-    {
-        var output = OutputDirectory();
-        Directory.CreateDirectory(output);
-        var copied = new List<string>();
-        foreach (var capture in captures)
-        {
-            var destination = Path.Combine(output, Path.GetFileName(capture));
-            File.Copy(capture, destination, true);
-            copied.Add(Path.GetFileName(destination));
-        }
-
-        var placementRows = new StringBuilder();
-        foreach (var placement in preview.Placements.OrderBy(value => value.elementId, StringComparer.Ordinal))
-        {
-            var contacts = placement.contactEvidenceSet != null && placement.contactEvidenceSet.Count > 0
-                ? string.Join("<br>", placement.contactEvidenceSet.Select(value => $"{value.surfaceId}: gap {value.gap.ToString("0.000", CultureInfo.InvariantCulture)}m / support {(value.supportCoverage * 100f).ToString("0", CultureInfo.InvariantCulture)}%"))
-                : "free-standing";
-            placementRows.Append($"<tr><td>{placement.descriptor.Prefab.name}</td><td>{placement.role}</td><td>{contacts}</td></tr>");
-        }
-
-        var cards = string.Join(Environment.NewLine, copied.Select(path => $"<figure><img src=\"{path}\" alt=\"{path}\"><figcaption>{path}</figcaption></figure>"));
-        var html = $@"<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>승인 계약 던전 방 검수</title><style>
-body{{margin:0;background:#11141b;color:#ece7dc;font:16px/1.55 system-ui,sans-serif}}main{{max-width:1320px;margin:auto;padding:32px}}h1{{margin:0 0 8px}}.status{{display:inline-block;background:#173d2b;color:#8ff0b5;padding:8px 12px;border-radius:999px;font-weight:800}}.note{{background:#222735;border-left:4px solid #d49b45;padding:14px 18px;margin:18px 0}}.grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}}figure{{margin:0;background:#1b202b;border:1px solid #343b4c;border-radius:14px;overflow:hidden}}img{{display:block;width:100%}}figcaption{{padding:10px 14px;color:#bfc7d8}}table{{width:100%;border-collapse:collapse;margin-top:22px;background:#171b24}}th,td{{border:1px solid #333b4b;padding:10px;text-align:left}}th{{color:#e8b86b}}@media(max-width:800px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main>
-<span class='status'>기술 검사 통과 · 오류 {report.ErrorCount}개</span><h1>Forgotten Warden Watch Room</h1><p>승인된 Spatial Contract만 사용한 비저장 배치 프리뷰입니다. 보급품이 남은 감시대장의 당직실이라는 콘셉트로, 단일 입구·균일한 바닥·의도적인 진입 여백을 사용했습니다.</p>
-<div class='note'><strong>이번에 확인할 것</strong><br>책장이 바닥과 벽에 동시에 자연스럽게 붙는지, 배너와 횃불이 벽/모서리에 끼지 않는지, 식량이 놓인 테이블·의자·장부 책장이 하나의 당직 공간으로 읽히는지 확인해 주세요.</div>
-<div class='grid'>{cards}</div><table><thead><tr><th>에셋</th><th>역할</th><th>접촉 증거</th></tr></thead><tbody>{placementRows}</tbody></table>
-<p>판정은 Codex 대화에서 <strong>승인</strong> 또는 <strong>수정 필요 + 이유</strong>로 알려 주세요. 이 페이지 자체는 씬에 Apply하지 않습니다.</p>
-</main></body></html>";
-        File.WriteAllText(Path.Combine(output, "review.html"), html, new UTF8Encoding(false));
-        File.WriteAllText(Path.Combine(output, "technical-report.txt"), $"seed={preview.Plan.Seed}{Environment.NewLine}placements={preview.Placements.Count}{Environment.NewLine}errors={report.ErrorCount}{Environment.NewLine}manifestHash={preview.ManifestHash}{Environment.NewLine}geometryProfileHash={preview.GeometryProfileHash}{Environment.NewLine}", new UTF8Encoding(false));
-    }
-
     private static void PlaceWall(Transform parent, string assetName, string objectName, Vector3 anchor, Quaternion rotation, WallSide side)
     {
         var instance = InstantiateStructure(FindModel(assetName), objectName, parent, rotation);
@@ -379,8 +343,6 @@ body{{margin:0;background:#11141b;color:#ece7dc;font:16px/1.55 system-ui,sans-se
         if (!string.IsNullOrWhiteSpace(parent)) EnsureFolder(parent);
         AssetDatabase.CreateFolder(parent, Path.GetFileName(path));
     }
-
-    private static string OutputDirectory() => Path.GetFullPath(Path.Combine(Application.dataPath, "..", OutputRelative));
 
     private enum WallSide { North, South, East, West }
 }

@@ -14,6 +14,7 @@ namespace UnityDecoScene.DungeonDecorator.Tests
     {
         private readonly List<Object> cleanup = new();
         private readonly List<string> assetCleanup = new();
+        private readonly List<string> reviewCleanup = new();
 
         [TearDown]
         public void TearDown()
@@ -21,8 +22,11 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             RoomPreviewManager.DiscardPreview();
             foreach (var item in cleanup.Where(item => item != null)) Object.DestroyImmediate(item);
             foreach (var path in assetCleanup) AssetDatabase.DeleteAsset(path);
+            foreach (var path in reviewCleanup.Where(Directory.Exists)) Directory.Delete(path, true);
+            if (reviewCleanup.Count > 0 && File.Exists(RoomReviewWorkflow.CurrentPath)) File.Delete(RoomReviewWorkflow.CurrentPath);
             cleanup.Clear();
             assetCleanup.Clear();
+            reviewCleanup.Clear();
         }
 
         [Test]
@@ -218,7 +222,7 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
-        public void PreviewApplyCreatesOneDecorationContainerAfterReview()
+        public void PreviewApplyRequiresExplicitHashBoundHumanApproval()
         {
             const string prefabPath = "Assets/__ConceptRoomDecoratorTestPrefab.prefab";
             AssetDatabase.DeleteAsset(prefabPath);
@@ -244,6 +248,26 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             Assert.That(preview.Placements.Count, Is.EqualTo(1));
             Assert.That((preview.Root.hideFlags & HideFlags.DontSaveInEditor) != 0, Is.True);
             RoomPreviewManager.SetVisualReview(new VisualQualityScores { mood = 100, style = 100, story = 100, composition = 100, feedback = "Reviewed in test." });
+            Assert.Throws<InvalidOperationException>(() => RoomPreviewManager.ApplyCurrent(),
+                "Advisory AI scores must never unlock Apply.");
+
+            RoomReviewTestCache.Seed(preview);
+            var run = RoomReviewWorkflow.Prepare(preview, false);
+            Assert.That(run.status, Is.EqualTo(RoomReviewStates.AwaitingHumanReview));
+            run.status = RoomReviewStates.Approved;
+            run.decision = new RoomReviewDecision
+            {
+                value = RoomReviewDecisions.Approved,
+                reviewer = "test-human",
+                reviewedUtc = DateTime.UtcNow.ToString("O"),
+                inputHash = run.inputHash,
+                technicalReportHash = run.technicalReportHash,
+                captureSetHash = run.capture.captureSetHash
+            };
+            var reviewStatePath = RoomReviewWorkflow.StatePathFor(run.targetId);
+            var reviewDirectory = Path.GetDirectoryName(reviewStatePath);
+            if (!string.IsNullOrWhiteSpace(reviewDirectory)) reviewCleanup.Add(reviewDirectory);
+            File.WriteAllText(reviewStatePath, JsonUtility.ToJson(run, true));
 
             var container = RoomPreviewManager.ApplyCurrent();
 

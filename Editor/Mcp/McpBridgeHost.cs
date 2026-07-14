@@ -145,6 +145,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 "validate_preview" => ValidatePreview(),
                 "capture_preview_views" => CapturePreviewViews(),
                 "submit_visual_review" => SubmitVisualReview(Parse<VisualReviewArgs>(argumentsJson)),
+                "prepare_room_review" => PrepareRoomReview(),
+                "get_room_review_agent_brief" => GetRoomReviewAgentBrief(),
+                "verify_room_review" => VerifyRoomReview(Parse<VerifyRoomReviewArgs>(argumentsJson)),
                 "discard_preview" => DiscardPreview(),
                 "begin_spatial_calibration" => BeginSpatialCalibration(Parse<BeginSpatialCalibrationArgs>(argumentsJson)),
                 "inspect_spatial_calibration" => InspectSpatialCalibration(),
@@ -315,7 +318,30 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             };
             RoomPreviewManager.SetVisualReview(scores);
             var passed = RoomPreviewManager.Current.LastValidation.MeetsVisualThresholds(RoomPreviewManager.Current.Plan.ConceptBrief);
-            return BridgeResponse.Success(new VisualReviewResultDto { passed = passed, scores = scores });
+            return BridgeResponse.Success(new VisualReviewResultDto { passed = passed, advisoryOnly = true, scores = scores });
+        }
+
+        private static BridgeResponse PrepareRoomReview()
+        {
+            if (RoomPreviewManager.Current == null) return BridgeResponse.Fail("There is no active preview.");
+            var run = RoomReviewWorkflow.PrepareCurrent(false);
+            return BridgeResponse.Success(RoomReviewHashUtility.BuildAgentBrief(run));
+        }
+
+        private static BridgeResponse GetRoomReviewAgentBrief()
+        {
+            var brief = RoomReviewWorkflow.GetAgentBrief();
+            return brief == null ? BridgeResponse.Fail("No room review has been prepared.") : BridgeResponse.Success(brief);
+        }
+
+        private static BridgeResponse VerifyRoomReview(VerifyRoomReviewArgs args)
+        {
+            if (args == null) return BridgeResponse.Fail("Review evidence hashes are required.");
+            return BridgeResponse.Success(RoomReviewWorkflow.VerifyCurrent(
+                args.runId,
+                args.inputHash,
+                args.technicalReportHash,
+                args.captureSetHash));
         }
 
         private static BridgeResponse DiscardPreview()
@@ -475,6 +501,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class LockArgs { public string[] ids; public bool locked = true; }
         [Serializable] private sealed class VisualReviewArgs { public int mood; public int style; public int story; public int composition; public string feedback; }
         [Serializable] private sealed class SpatialProposalArgs { public string proposalJson; }
+        [Serializable] private sealed class VerifyRoomReviewArgs { public string runId; public string inputHash; public string technicalReportHash; public string captureSetHash; }
         [Serializable] private sealed class BeginSpatialCalibrationArgs { public string descriptorAssetPath; public string template; public string targetPrefabPath; }
         [Serializable] private sealed class CreatePreviewArgs { public string roomId; public string briefAssetPath; public string catalogAssetPath; public int seed = 12345; public float density = 0.5f; public CompositionElementDto[] elements; }
         [Serializable] private sealed class CompositionElementDto { public string elementId; public string descriptorId; public string role; public string relation; public string anchorElementId; public int count = 1; public string preferredZone; public string preferredSurfaceId; public float spacing = 1f; public bool locked; }
@@ -487,7 +514,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class StatusDto { public string message; }
         [Serializable] private sealed class PreviewResultDto { public string sessionId; public int placementCount; public int assetGapCount; public string manifestHash; public string geometryProfileHash; public int seed; public PlacementDto[] placements; }
         [Serializable] private sealed class PlacementDto { public string placementId; public string elementId; public string assetId; public string role; public Vector3 position; public Vector3 eulerAngles; public Vector3 scale; public bool locked; }
-        [Serializable] private sealed class VisualReviewResultDto { public bool passed; public VisualQualityScores scores; }
+        [Serializable] private sealed class VisualReviewResultDto { public bool passed; public bool advisoryOnly; public VisualQualityScores scores; }
         [Serializable] private sealed class SpatialCalibrationInfoDto { public string sessionId; public string subjectName; public string subjectAssetPath; public string targetName; public string template; public int collisionProxyCount; public int contactRuleCount; public string technicalState; public int technicalErrorCount; public string captureSetHash; public string[] draftPaths; public bool hasAgentProposal; }
         [Serializable] private sealed class SpatialCaptureResultDto { public string sessionId; public bool technicalPassed; public int technicalErrorCount; public string reportHash; public string captureSetHash; public string[] rawPaths; public string[] evidencePaths; public string[] draftPaths; }
         [Serializable] private sealed class SpatialDraftDto { public string path; public string json; }

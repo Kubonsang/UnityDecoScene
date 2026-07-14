@@ -51,6 +51,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public static string ReviewPath => ProjectPath(ReviewRelativePath);
         public static string AgentBriefPath => ProjectPath(AgentBriefRelativePath);
 
+        public static void EnsureReviewBridgeRunning() => StartReviewBridge();
+
         [MenuItem("Tools/Concept Room Decorator/Fast Calibration/Scan or Resume")]
         public static void ScanOrResumeMenu() => ScanOrResume();
 
