@@ -209,14 +209,14 @@ public static class ApprovedContractDungeonRoomBootstrap
 
     private static void BuildCornerPillars(Transform parent, float width, float depth)
     {
-        var pillar = FindModel("pillar_decorated");
+        var pillar = FindModel("pillar");
         foreach (var position in new[]
                  {
                      new Vector3(-width * 0.5f, 0f, -depth * 0.5f), new Vector3(width * 0.5f, 0f, -depth * 0.5f),
                      new Vector3(-width * 0.5f, 0f, depth * 0.5f), new Vector3(width * 0.5f, 0f, depth * 0.5f)
                  })
         {
-            var instance = InstantiateStructure(pillar, "Dungeon Corner Pillar", parent, Quaternion.identity);
+            var instance = InstantiateStructure(pillar, "Plain Dungeon Corner Pillar", parent, Quaternion.identity);
             var bounds = RendererBounds(instance);
             instance.transform.position += position - new Vector3(bounds.center.x, bounds.min.y, bounds.center.z);
         }
