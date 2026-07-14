@@ -86,7 +86,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             var profile = item.descriptor.Geometry;
             if (profile == null) return;
-            var rules = profile.EffectiveContacts.Where(value => value != null && value.requirement != ContactRequirement.FreeStanding).ToArray();
+            var rules = profile.EffectiveContacts
+                .Where(value => value != null && value.requirement != ContactRequirement.FreeStanding)
+                .OrderBy(ContactOrder)
+                .ToArray();
             if (rules.Length == 0) return;
             var surfaceIds = item.surfaceIds != null && item.surfaceIds.Count > 0
                 ? item.surfaceIds
@@ -233,5 +236,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static bool IsFinite(Vector3 value) =>
             float.IsFinite(value.x) && float.IsFinite(value.y) && float.IsFinite(value.z);
+
+        private static int ContactOrder(ContactRules rules) => rules.requirement switch
+        {
+            ContactRequirement.WallBacked or ContactRequirement.WallMounted => 0,
+            ContactRequirement.FloorSupported => 1,
+            ContactRequirement.CeilingMounted => 2,
+            _ => 3
+        };
     }
 }
