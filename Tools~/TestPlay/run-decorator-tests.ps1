@@ -18,7 +18,7 @@ function Find-TestPlay {
         if (Test-Path -LiteralPath $candidate) { return $candidate }
     }
 
-    throw "testplay was not found. Install it with: go install github.com/Kubonsang/testplay-runner/cmd/testplay@v0.10.0"
+    throw "testplay was not found. Install it with: go install github.com/Kubonsang/testplay-runner/cmd/testplay@v0.11.0"
 }
 
 function Short-Failure($test) {

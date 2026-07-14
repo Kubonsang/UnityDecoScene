@@ -7,6 +7,33 @@
 [Ll]ogs/
 UserSettings/
 MemoryCaptures/
+.testplay/
+.testplay-*/
+
+# Local agent and validation workspaces
+.cache/
+.tmp/
+.codex/
+.agents/
+.npm-cache/
+
+# Web prototype output
+node_modules/
+dist/
+*.log
+
+# Local credentials and certificates
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.p12
+*.key
+
+# Local visual QA comparisons
+design-qa-*.png
+design-qa-*.png.meta
 
 # IDE-generated files
 .vs/

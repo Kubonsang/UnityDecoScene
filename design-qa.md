@@ -1,8 +1,8 @@
 # Design QA — Calibration Review Decision Lists
 
-- Source visual truth: `C:\Users\user\.codex\generated_images\019f4c47-fc3c-79b3-9eb6-1b25402bb561\exec-8f96e412-61bd-486f-8997-bbf85e8d11ee.png`
-- Implementation screenshot: `C:\Users\user\Documents\UnityDecoScene\design-qa-implementation.png`
-- Full-view comparison: `C:\Users\user\Documents\UnityDecoScene\design-qa-comparison.png`
+- Source visual truth: [selected-review-studio.png](Prototype~/PreferenceStudioWeb/design-references/selected-review-studio.png)
+- Implementation screenshot: [implementation-final.png](Prototype~/PreferenceStudioWeb/public/qa/implementation-final.png)
+- Full-view comparison: generated locally during QA and intentionally not committed
 - Viewport: 1440 × 1024, dark desktop review workflow
 - State: 14 persisted approvals, 1 `RevisionRequested` item (`torch_mounted`), 7 undecided `AwaitingHumanReview` items
 

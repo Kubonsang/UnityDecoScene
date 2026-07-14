@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- Added human-reviewed asset and interaction Spatial Contracts with hash-bound approval states.
+- Added a temporary Spatial Calibration stage with editable compound OBBs and contact frames.
+- Added deterministic multi-contact validation for floor-supported, wall-backed, wall-mounted, and supported-by relationships.
+- Added four-view calibration evidence, revision feedback, and a nonce-protected local review bridge.
+- Added Korean Preference Studio review status, texture-variant grouping, and explicit wall selection.
+- Added deterministic room-review evidence caching and approved-contract dungeon preview validation.
+- Added a compact TestPlay v0.11.0 bridge workflow for package-scoped EditMode regression tests.
+
 ## 0.2.0
 
 - Added reviewed compound OBB geometry profiles and bottom/back contact frames.

@@ -7,7 +7,7 @@ The default command runs only the Dungeon Decorator EditMode tests and prints on
   -ProjectPath "C:\path\to\UnityProject"
 ```
 
-The Unity project must contain `testplay.decorator.windows.json`, and TestPlay v0.10.0 plus the matching `com.testplay.bridge` package must be installed. When the Editor is open and the Pristine Gate passes, the result should contain `"backend":"bridge"`.
+The Unity project must contain `testplay.decorator.windows.json`, and TestPlay v0.11.0 plus the matching `com.testplay.bridge` package must be installed. When the Editor is open and the Pristine Gate passes, the result should contain `"backend":"bridge"`.
 
 Use `-Filter` for one test. Use `-All` only when the whole host project's EditMode baseline is intentionally required:
 
