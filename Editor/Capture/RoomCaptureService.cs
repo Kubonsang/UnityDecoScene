@@ -33,8 +33,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var insetZ = bounds.size.z * 0.08f;
             var cornerA = new Vector3(bounds.min.x + insetX, height, bounds.min.z + insetZ);
             var cornerB = new Vector3(bounds.max.x - insetX, height, bounds.max.z - insetZ);
-            session.CapturePaths.Add(Render(directory, "corner-a", cornerA, Quaternion.LookRotation((bounds.center - cornerA).normalized, Vector3.up), false, 5f, 65f));
-            session.CapturePaths.Add(Render(directory, "corner-b", cornerB, Quaternion.LookRotation((bounds.center - cornerB).normalized, Vector3.up), false, 5f, 65f));
+            var floorFocus = new Vector3(bounds.center.x, bounds.min.y + bounds.size.y * 0.3f, bounds.center.z);
+            session.CapturePaths.Add(Render(directory, "corner-a", cornerA, Quaternion.LookRotation((floorFocus - cornerA).normalized, Vector3.up), false, 5f, 58f));
+            session.CapturePaths.Add(Render(directory, "corner-b", cornerB, Quaternion.LookRotation((floorFocus - cornerB).normalized, Vector3.up), false, 5f, 58f));
             return session.CapturePaths;
         }
 

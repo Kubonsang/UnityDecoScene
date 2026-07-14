@@ -151,11 +151,11 @@ public static class ApprovedContractDungeonRoomBootstrap
         var observationObject = new GameObject("Single Entrance Observation");
         observationObject.transform.SetParent(root.transform, false);
         observationObject.transform.position = new Vector3(0f, 1.65f, -depth * 0.5f + 0.35f);
-        observationObject.transform.rotation = Quaternion.LookRotation(new Vector3(0f, 1.55f, depth * 0.22f) - observationObject.transform.position, Vector3.up);
+        observationObject.transform.rotation = Quaternion.LookRotation(new Vector3(0f, 1.15f, depth * 0.22f) - observationObject.transform.position, Vector3.up);
         var observation = observationObject.AddComponent<RoomObservationPoint>();
         var serializedObservation = new SerializedObject(observation);
         serializedObservation.FindProperty("label").stringValue = "South entrance";
-        serializedObservation.FindProperty("fieldOfView").floatValue = 88f;
+        serializedObservation.FindProperty("fieldOfView").floatValue = 72f;
         serializedObservation.FindProperty("primary").boolValue = true;
         serializedObservation.ApplyModifiedPropertiesWithoutUndo();
 
@@ -263,8 +263,8 @@ public static class ApprovedContractDungeonRoomBootstrap
             var light = lightObject.AddComponent<Light>();
             light.type = LightType.Point;
             light.color = new Color(1f, 0.48f, 0.18f);
-            light.intensity = 85f;
-            light.range = 3.4f;
+            light.intensity = 38f;
+            light.range = 2.8f;
             light.shadows = LightShadows.Soft;
         }
     }
@@ -282,7 +282,7 @@ public static class ApprovedContractDungeonRoomBootstrap
         fill.type = LightType.Point;
         fill.transform.position = new Vector3(0f, 2.8f, 2.1f);
         fill.color = new Color(1f, 0.5f, 0.23f);
-        fill.intensity = 95f;
+        fill.intensity = 70f;
         fill.range = 5.5f;
         fill.shadows = LightShadows.Soft;
 
