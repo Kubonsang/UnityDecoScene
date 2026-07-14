@@ -58,8 +58,8 @@ public static class ApprovedContractDungeonRoomBootstrap
 
         var descriptors = new Dictionary<string, DecorAssetDescriptor>(StringComparer.Ordinal)
         {
-            ["bookcase"] = CreateApprovedDescriptor("bookcase_double_decoratedA", DecorRole.Hero, PlacementSurface.Wall, "archive", "records"),
-            ["table"] = CreateApprovedDescriptor("table_long_decorated_A", DecorRole.Support, PlacementSurface.Floor, "archive", "work-table"),
+            ["bookcase"] = CreateApprovedDescriptor("bookcase_double_decoratedA", DecorRole.Support, PlacementSurface.Wall, "archive", "duty-ledgers"),
+            ["table"] = CreateApprovedDescriptor("table_long_decorated_A", DecorRole.Hero, PlacementSurface.Floor, "watch-room", "warden-table"),
             ["chair"] = CreateApprovedDescriptor("chair", DecorRole.Support, PlacementSurface.Floor, "archive", "used-seat"),
             ["chest"] = CreateApprovedDescriptor("chest_large", DecorRole.StoryEvidence, PlacementSurface.Floor, "storage", "sealed-records"),
             ["barrels"] = CreateApprovedDescriptor("barrel_small_stack", DecorRole.Clutter, PlacementSurface.Floor, "storage", "provisions"),
@@ -73,15 +73,15 @@ public static class ApprovedContractDungeonRoomBootstrap
         AssetDatabase.CreateAsset(catalog, $"{DataRoot}/Data/ApprovedContractDungeonCatalog.asset");
 
         var brief = ScriptableObject.CreateInstance<RoomConceptBrief>();
-        brief.name = "Forgotten Warden Records Room";
-        AssetDatabase.CreateAsset(brief, $"{DataRoot}/Data/ForgottenWardenRecordsRoom.asset");
+        brief.name = "Forgotten Warden Watch Room";
+        AssetDatabase.CreateAsset(brief, $"{DataRoot}/Data/ForgottenWardenWatchRoom.asset");
         AssetDatabase.SaveAssets();
 
         var elements = new[]
         {
-            Element("01-hero-archive", descriptors["bookcase"], DecorRole.Hero, PreferredZone.Focal, 1, preferredSurfaceId: "wall-north"),
-            Element("02-work-table", descriptors["table"], DecorRole.Support, PreferredZone.Center, 1),
-            Element("03-used-chairs", descriptors["chair"], DecorRole.Support, PreferredZone.Center, 2, CompositionRelation.Surrounds, "02-work-table", 1.65f),
+            Element("01-warden-table", descriptors["table"], DecorRole.Hero, PreferredZone.Focal, 1),
+            Element("02-duty-ledgers", descriptors["bookcase"], DecorRole.Support, PreferredZone.Perimeter, 1, preferredSurfaceId: "wall-north"),
+            Element("03-used-chairs", descriptors["chair"], DecorRole.Support, PreferredZone.Center, 2, CompositionRelation.Surrounds, "01-warden-table", 1.65f),
             Element("04-sealed-records", descriptors["chest"], DecorRole.StoryEvidence, PreferredZone.Corner, 1),
             Element("05-warden-banner", descriptors["banner"], DecorRole.StoryEvidence, PreferredZone.Perimeter, 1, preferredSurfaceId: "wall-north"),
             Element("06-west-torch", descriptors["torch"], DecorRole.LightingCue, PreferredZone.Perimeter, 1, preferredSurfaceId: "wall-west"),
@@ -129,7 +129,7 @@ public static class ApprovedContractDungeonRoomBootstrap
         var depth = segment * 5f;
         var height = Mathf.Max(4f, wallBounds.size.y);
 
-        var root = new GameObject("Forgotten Warden Records Room");
+        var root = new GameObject("Forgotten Warden Watch Room");
         var shell = new GameObject("KayKit Dungeon Shell - One Entrance").transform;
         shell.SetParent(root.transform, false);
 
@@ -263,8 +263,8 @@ public static class ApprovedContractDungeonRoomBootstrap
             var light = lightObject.AddComponent<Light>();
             light.type = LightType.Point;
             light.color = new Color(1f, 0.48f, 0.18f);
-            light.intensity = 230f;
-            light.range = 5f;
+            light.intensity = 85f;
+            light.range = 3.4f;
             light.shadows = LightShadows.Soft;
         }
     }
@@ -282,8 +282,8 @@ public static class ApprovedContractDungeonRoomBootstrap
         fill.type = LightType.Point;
         fill.transform.position = new Vector3(0f, 2.8f, 2.1f);
         fill.color = new Color(1f, 0.5f, 0.23f);
-        fill.intensity = 180f;
-        fill.range = 6f;
+        fill.intensity = 95f;
+        fill.range = 5.5f;
         fill.shadows = LightShadows.Soft;
 
         RenderSettings.skybox = null;
@@ -318,8 +318,8 @@ public static class ApprovedContractDungeonRoomBootstrap
         var cards = string.Join(Environment.NewLine, copied.Select(path => $"<figure><img src=\"{path}\" alt=\"{path}\"><figcaption>{path}</figcaption></figure>"));
         var html = $@"<!doctype html><html lang='ko'><head><meta charset='utf-8'><title>승인 계약 던전 방 검수</title><style>
 body{{margin:0;background:#11141b;color:#ece7dc;font:16px/1.55 system-ui,sans-serif}}main{{max-width:1320px;margin:auto;padding:32px}}h1{{margin:0 0 8px}}.status{{display:inline-block;background:#173d2b;color:#8ff0b5;padding:8px 12px;border-radius:999px;font-weight:800}}.note{{background:#222735;border-left:4px solid #d49b45;padding:14px 18px;margin:18px 0}}.grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}}figure{{margin:0;background:#1b202b;border:1px solid #343b4c;border-radius:14px;overflow:hidden}}img{{display:block;width:100%}}figcaption{{padding:10px 14px;color:#bfc7d8}}table{{width:100%;border-collapse:collapse;margin-top:22px;background:#171b24}}th,td{{border:1px solid #333b4b;padding:10px;text-align:left}}th{{color:#e8b86b}}@media(max-width:800px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main>
-<span class='status'>기술 검사 통과 · 오류 {report.ErrorCount}개</span><h1>Forgotten Warden Records Room</h1><p>승인된 Spatial Contract만 사용한 비저장 배치 프리뷰입니다. 단일 입구, 균일한 바닥, 의도적인 중앙 여백을 사용했습니다.</p>
-<div class='note'><strong>이번에 확인할 것</strong><br>책장이 바닥과 벽에 동시에 자연스럽게 붙는지, 배너와 횃불이 벽/모서리에 끼지 않는지, 테이블과 의자가 하나의 기록 작업 공간으로 읽히는지 확인해 주세요.</div>
+<span class='status'>기술 검사 통과 · 오류 {report.ErrorCount}개</span><h1>Forgotten Warden Watch Room</h1><p>승인된 Spatial Contract만 사용한 비저장 배치 프리뷰입니다. 보급품이 남은 감시대장의 당직실이라는 콘셉트로, 단일 입구·균일한 바닥·의도적인 진입 여백을 사용했습니다.</p>
+<div class='note'><strong>이번에 확인할 것</strong><br>책장이 바닥과 벽에 동시에 자연스럽게 붙는지, 배너와 횃불이 벽/모서리에 끼지 않는지, 식량이 놓인 테이블·의자·장부 책장이 하나의 당직 공간으로 읽히는지 확인해 주세요.</div>
 <div class='grid'>{cards}</div><table><thead><tr><th>에셋</th><th>역할</th><th>접촉 증거</th></tr></thead><tbody>{placementRows}</tbody></table>
 <p>판정은 Codex 대화에서 <strong>승인</strong> 또는 <strong>수정 필요 + 이유</strong>로 알려 주세요. 이 페이지 자체는 씬에 Apply하지 않습니다.</p>
 </main></body></html>";

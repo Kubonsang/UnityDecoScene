@@ -48,7 +48,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             camera.fieldOfView = fieldOfView;
             camera.nearClipPlane = 0.03f;
             camera.farClipPlane = 1000f;
-            camera.clearFlags = CameraClearFlags.Skybox;
+            camera.clearFlags = RenderSettings.skybox != null ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
+            camera.backgroundColor = new Color(0.008f, 0.009f, 0.012f, 1f);
             camera.allowHDR = true;
 
             var renderTexture = RenderTexture.GetTemporary(CaptureSize, CaptureSize, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
