@@ -121,6 +121,41 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void BookcaseSatisfiesWallAndFloorContactsTogether()
+        {
+            var room = CreateRoom();
+            var wallObject = new GameObject("North Wall Surface");
+            cleanup.Add(wallObject);
+            wallObject.transform.SetParent(room.transform, false);
+            var wall = wallObject.AddComponent<RoomSurface>();
+            wall.Configure("wall-north", RoomSurfaceType.Wall, room.AuthoringBounds, new Vector3(0f, 2f, 4f), Vector3.back, Vector3.left, new Vector2(8f, 4f), true);
+            room.RefreshChildren();
+
+            var descriptor = CreateDescriptor("bookcase-dual-contact", "gothic", DecorRole.Hero);
+            descriptor.Geometry.contacts = new List<ContactRules>
+            {
+                new() { ruleId = "floor", frameId = "bottom", requirement = ContactRequirement.FloorSupported, minimumGap = 0f, maximumGap = 0.01f, minimumSupportCoverage = 0.6f },
+                new() { ruleId = "wall", frameId = "back", requirement = ContactRequirement.WallBacked, minimumGap = 0.01f, maximumGap = 0.05f, minimumSupportCoverage = 0.6f }
+            };
+            descriptor.Geometry.Normalize();
+            var catalog = Track(ScriptableObject.CreateInstance<DecorCatalog>());
+            catalog.ReplaceAll(new[] { descriptor });
+            var plan = Track(ScriptableObject.CreateInstance<RoomCompositionPlan>());
+            plan.Configure(room, null, catalog, 17, 0.5f, new[] { new CompositionElement { elementId = "hero", descriptorId = descriptor.AssetId, role = DecorRole.Hero } });
+
+            var result = DeterministicLayoutEngine.Generate(plan);
+
+            Assert.That(result.Placements.Count, Is.EqualTo(1));
+            Assert.That(result.Placements[0].surfaceIds, Is.EqualTo(new[] { "wall-north", "floor-main" }));
+            Assert.That(result.Placements[0].contactEvidenceSet, Has.Count.EqualTo(2));
+            Assert.That(result.Placements[0].contactEvidenceSet.All(value => value.valid), Is.True);
+            var session = new PreviewSession { SessionId = "dual-contact", Plan = plan };
+            session.Placements.Add(result.Placements[0]);
+            var report = PreviewValidationService.Validate(session);
+            Assert.That(report.issues.Any(issue => issue.code is "CONTACT_GAP" or "SURFACE_PENETRATION" or "INSUFFICIENT_SUPPORT" or "CONTACT_DIRECTION"), Is.False);
+        }
+
+        [Test]
         public void SharedSpatialFixtureMatchesObbSatVerdicts()
         {
             var guid = AssetDatabase.FindAssets("spatial_cases").First();

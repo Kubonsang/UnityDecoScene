@@ -238,7 +238,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     motifs = item.Motifs.ToArray(),
                     reviewed = item.Reviewed,
                     geometryReviewed = item.Geometry != null && item.Geometry.IsUsable,
-                    contactRequirement = item.Geometry?.contact?.requirement.ToString() ?? string.Empty,
+                    contactRequirement = item.Geometry != null ? string.Join("+", item.Geometry.EffectiveContacts.Select(value => value.requirement.ToString())) : string.Empty,
                     prefabPath = AssetDatabase.GetAssetPath(item.Prefab)
                 }).ToArray();
             return BridgeResponse.Success(new AssetSearchResultDto { assets = matches });

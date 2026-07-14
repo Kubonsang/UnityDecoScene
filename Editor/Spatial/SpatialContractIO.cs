@@ -71,7 +71,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (!string.Equals(document.asset.dependency_hash, dependencyHash, StringComparison.Ordinal)) { reason = "Contract is stale because the prefab dependency hash changed."; return false; }
 
             var frames = document.asset.frames.ToDictionary(value => value.id, value => value.ToFrame(), StringComparer.Ordinal);
-            var primary = document.asset.contacts.FirstOrDefault();
+            var importedContacts = document.asset.contacts.Select(ToRules).ToList();
+            var primary = importedContacts.FirstOrDefault();
             var profile = new DecorGeometryProfile
             {
                 source = GeometrySource.Manual,
@@ -81,7 +82,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 pivotOffset = SpatialContractArrays.Vector(document.asset.pivot_offset),
                 bottomContact = frames.TryGetValue("bottom", out var bottom) ? bottom : descriptor.Geometry.bottomContact,
                 backContact = frames.TryGetValue("back", out var back) ? back : descriptor.Geometry.backContact,
-                contact = ToRules(primary),
+                contact = primary ?? ContactRules.Defaults(ContactRequirement.FreeStanding),
+                contacts = importedContacts,
                 inferenceConfidence = 1f,
                 reviewed = true,
                 dependencyHash = dependencyHash
@@ -171,6 +173,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             Enum.TryParse(source.kind, out ContactRequirement requirement);
             return new ContactRules
             {
+                ruleId = source.id,
+                frameId = source.frame_id,
                 requirement = requirement,
                 minimumGap = source.minimum_gap,
                 maximumGap = source.maximum_gap,

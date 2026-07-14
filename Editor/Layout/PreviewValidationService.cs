@@ -36,7 +36,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     continue;
                 }
 
-                if (!room.ContainsBounds(item.worldBounds, !string.IsNullOrWhiteSpace(item.surfaceId)))
+                if (!room.ContainsBounds(item.worldBounds, (item.surfaceIds?.Count ?? 0) > 0 || !string.IsNullOrWhiteSpace(item.surfaceId)))
                     report.issues.Add(new ValidationIssue("OUTSIDE_ROOM", ValidationSeverity.Error, $"{item.descriptor.name} extends outside the room bounds.", item.placementId));
 
                 if (!IsFinite(item.position) || !IsFinite(item.scale) || item.scale.x <= 0f || item.scale.y <= 0f || item.scale.z <= 0f)
@@ -85,29 +85,47 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private static void ValidateContact(ConceptRoom room, PlacedDecorItem item, ValidationReport report)
         {
             var profile = item.descriptor.Geometry;
-            if (profile?.contact == null || profile.contact.requirement == ContactRequirement.FreeStanding) return;
-            var surface = room.Surfaces.FirstOrDefault(value => value != null && value.SurfaceId == item.surfaceId);
-            if (surface == null || !surface.Reviewed)
-            {
-                report.issues.Add(new ValidationIssue("SURFACE_UNREVIEWED", ValidationSeverity.Error, $"{item.descriptor.name} is not attached to a reviewed room surface.", item.placementId));
-                return;
-            }
-            if (!surface.Supported)
-            {
-                report.issues.Add(new ValidationIssue("UNSUPPORTED_SURFACE", ValidationSeverity.Error, surface.UnsupportedReason, item.placementId));
-                return;
-            }
+            if (profile == null) return;
+            var rules = profile.EffectiveContacts.Where(value => value != null && value.requirement != ContactRequirement.FreeStanding).ToArray();
+            if (rules.Length == 0) return;
+            var surfaceIds = item.surfaceIds != null && item.surfaceIds.Count > 0
+                ? item.surfaceIds
+                : new List<string> { item.surfaceId };
+            item.contactEvidenceSet ??= new List<ContactEvidence>();
+            item.contactEvidenceSet.Clear();
 
-            var evidence = SpatialGeometryUtility.EvaluateContact(item.descriptor, item.position, item.rotation, item.scale, surface);
-            item.contactEvidence = evidence;
-            if (evidence.penetration > profile.contact.maximumPenetration + 0.000001f)
-                report.issues.Add(new ValidationIssue("SURFACE_PENETRATION", ValidationSeverity.Error, $"{item.descriptor.name} penetrates '{surface.SurfaceId}' by {evidence.penetration:0.####}m.", item.placementId));
-            if (evidence.gap < profile.contact.minimumGap - 0.000001f || evidence.gap > profile.contact.maximumGap + 0.000001f)
-                report.issues.Add(new ValidationIssue("CONTACT_GAP", ValidationSeverity.Error, $"{item.descriptor.name} gap to '{surface.SurfaceId}' is {evidence.gap:0.####}m; expected {profile.contact.minimumGap:0.####}-{profile.contact.maximumGap:0.####}m.", item.placementId));
-            if (evidence.supportCoverage < profile.contact.minimumSupportCoverage - 0.000001f)
-                report.issues.Add(new ValidationIssue("INSUFFICIENT_SUPPORT", ValidationSeverity.Error, $"{item.descriptor.name} contact coverage is {evidence.supportCoverage:P0}; expected at least {profile.contact.minimumSupportCoverage:P0}.", item.placementId));
-            if (evidence.directionAlignment < 0.95f)
-                report.issues.Add(new ValidationIssue("CONTACT_DIRECTION", ValidationSeverity.Error, $"{item.descriptor.name} contact face does not oppose '{surface.SurfaceId}'.", item.placementId));
+            for (var index = 0; index < rules.Length; index++)
+            {
+                var rule = rules[index];
+                var surfaceId = index < surfaceIds.Count ? surfaceIds[index] : string.Empty;
+                var surface = room.Surfaces.FirstOrDefault(value => value != null && value.SurfaceId == surfaceId);
+                if (surface == null || !surface.Reviewed)
+                {
+                    report.issues.Add(new ValidationIssue("SURFACE_UNREVIEWED", ValidationSeverity.Error, $"{item.descriptor.name} is missing a reviewed {rule.requirement} surface.", item.placementId));
+                    continue;
+                }
+                if (!surface.Supported)
+                {
+                    report.issues.Add(new ValidationIssue("UNSUPPORTED_SURFACE", ValidationSeverity.Error, surface.UnsupportedReason, item.placementId));
+                    continue;
+                }
+
+                var evidence = SpatialGeometryUtility.EvaluateContact(item.descriptor, rule, item.position, item.rotation, item.scale, surface);
+                item.contactEvidenceSet.Add(evidence);
+                if (index == 0)
+                {
+                    item.surfaceId = surface.SurfaceId;
+                    item.contactEvidence = evidence;
+                }
+                if (evidence.penetration > rule.maximumPenetration + 0.000001f)
+                    report.issues.Add(new ValidationIssue("SURFACE_PENETRATION", ValidationSeverity.Error, $"{item.descriptor.name} penetrates '{surface.SurfaceId}' by {evidence.penetration:0.####}m.", item.placementId));
+                if (evidence.gap < rule.minimumGap - 0.000001f || evidence.gap > rule.maximumGap + 0.000001f)
+                    report.issues.Add(new ValidationIssue("CONTACT_GAP", ValidationSeverity.Error, $"{item.descriptor.name} {rule.requirement} gap to '{surface.SurfaceId}' is {evidence.gap:0.####}m; expected {rule.minimumGap:0.####}-{rule.maximumGap:0.####}m.", item.placementId));
+                if (evidence.supportCoverage < rule.minimumSupportCoverage - 0.000001f)
+                    report.issues.Add(new ValidationIssue("INSUFFICIENT_SUPPORT", ValidationSeverity.Error, $"{item.descriptor.name} {rule.requirement} coverage is {evidence.supportCoverage:P0}; expected at least {rule.minimumSupportCoverage:P0}.", item.placementId));
+                if (evidence.directionAlignment < 0.95f)
+                    report.issues.Add(new ValidationIssue("CONTACT_DIRECTION", ValidationSeverity.Error, $"{item.descriptor.name} {rule.requirement} face does not oppose '{surface.SurfaceId}'.", item.placementId));
+            }
         }
 
         private static void ValidateStyle(IEnumerable<PlacedDecorItem> placements, ValidationReport report)

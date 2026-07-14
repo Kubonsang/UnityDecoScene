@@ -199,6 +199,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             worldBounds = source.worldBounds,
             surfaceId = source.surfaceId,
             contactEvidence = source.contactEvidence,
+            surfaceIds = source.surfaceIds != null ? new List<string>(source.surfaceIds) : new List<string>(),
+            contactEvidenceSet = source.contactEvidenceSet != null ? new List<ContactEvidence>(source.contactEvidenceSet) : new List<ContactEvidence>(),
             locked = true
         };
 
@@ -214,7 +216,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             var text = new StringBuilder();
             foreach (var descriptor in plan.Catalog.Assets.Where(value => value?.Geometry != null).OrderBy(value => value.AssetId, StringComparer.Ordinal))
-                text.Append(descriptor.AssetId).Append(':').Append(descriptor.Geometry.dependencyHash).Append(':').Append(descriptor.Geometry.reviewed ? '1' : '0').Append('|');
+            {
+                text.Append(descriptor.AssetId).Append(':').Append(descriptor.Geometry.dependencyHash).Append(':').Append(descriptor.Geometry.reviewed ? '1' : '0');
+                foreach (var rules in descriptor.Geometry.EffectiveContacts)
+                    text.Append(':').Append(rules.ruleId).Append('/').Append(rules.requirement).Append('/').Append(rules.frameId)
+                        .Append('/').Append(rules.minimumGap.ToString("R", CultureInfo.InvariantCulture))
+                        .Append('/').Append(rules.maximumGap.ToString("R", CultureInfo.InvariantCulture));
+                text.Append('|');
+            }
             return Hash128.Compute(text.ToString()).ToString();
         }
 

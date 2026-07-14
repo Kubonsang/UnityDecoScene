@@ -19,6 +19,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public Bounds worldBounds;
         public string surfaceId;
         public ContactEvidence contactEvidence;
+        public List<string> surfaceIds = new();
+        public List<ContactEvidence> contactEvidenceSet = new();
         public bool locked;
         [NonSerialized] public GameObject previewObject;
     }

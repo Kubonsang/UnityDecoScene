@@ -105,10 +105,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public static ContactEvidence EvaluateContact(DecorAssetDescriptor descriptor, Vector3 position, Quaternion rotation, Vector3 scale, RoomSurface surface)
         {
+            return EvaluateContact(descriptor, descriptor?.Geometry?.contact, position, rotation, scale, surface);
+        }
+
+        public static ContactEvidence EvaluateContact(DecorAssetDescriptor descriptor, ContactRules rules, Vector3 position, Quaternion rotation, Vector3 scale, RoomSurface surface)
+        {
             var profile = descriptor?.Geometry;
-            var rules = profile?.contact;
             if (profile == null || rules == null || surface == null) return new ContactEvidence { valid = false };
-            var frame = rules.requirement is ContactRequirement.WallBacked or ContactRequirement.WallMounted ? profile.backContact : profile.bottomContact;
+            var frame = profile.FrameFor(rules);
             if (frame == null) return new ContactEvidence { valid = false, surfaceId = surface.SurfaceId };
 
             var contactPoint = position + rotation * Vector3.Scale(frame.localPoint, scale);
@@ -136,7 +140,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public static Quaternion AlignContactFrame(DecorGeometryProfile profile, RoomSurface surface)
         {
-            var frame = profile.contact.requirement is ContactRequirement.WallBacked or ContactRequirement.WallMounted ? profile.backContact : profile.bottomContact;
+            return AlignContactFrame(profile, profile?.contact, surface);
+        }
+
+        public static Quaternion AlignContactFrame(DecorGeometryProfile profile, ContactRules rules, RoomSurface surface)
+        {
+            var frame = profile?.FrameFor(rules);
             var localNormal = frame?.localNormal ?? Vector3.down;
             var localTangent = frame?.localTangent ?? Vector3.right;
             var targetNormal = -surface.Normal;
