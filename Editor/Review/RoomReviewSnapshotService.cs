@@ -223,6 +223,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 value.arrangementId ?? string.Empty,
                 value.affinityGroup ?? string.Empty,
                 value.supportPlacementId ?? string.Empty,
+                value.supportContactFrameId ?? string.Empty,
                 value.stackLevel.ToString(CultureInfo.InvariantCulture),
                 value.locked ? "1" : "0")))
             .ToList();

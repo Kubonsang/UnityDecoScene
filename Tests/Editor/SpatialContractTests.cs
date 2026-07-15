@@ -186,12 +186,16 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
         }
 
         [Test]
-        public void SupportedByBackFrameLaysSubjectFlatAndPersistsSelectedFrames()
+        public void SupportedByFlatFrameUsesThinnestObbFaceAndPersistsPoseIntent()
         {
-            var subject = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            subject.transform.localScale = new Vector3(0.2f, 0.5f, 0.355f);
-            var target = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            target.transform.localScale = new Vector3(2f, 0.5f, 1.5f);
+            var subject = new GameObject("Flat Book Root");
+            var subjectMesh = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            subjectMesh.transform.SetParent(subject.transform, false);
+            subjectMesh.transform.localScale = new Vector3(0.2f, 0.5f, 0.355f);
+            var target = new GameObject("Table Root");
+            var targetMesh = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            targetMesh.transform.SetParent(target.transform, false);
+            targetMesh.transform.localScale = new Vector3(2f, 0.5f, 1.5f);
             var descriptor = ScriptableObject.CreateInstance<DecorAssetDescriptor>();
             IReadOnlyList<string> paths = null;
             try
@@ -199,13 +203,16 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
                 descriptor.InitializeFromScan("flat-book", subject,
                     new Bounds(Vector3.zero, new Vector3(0.2f, 0.5f, 0.355f)), DecorAssetType.Prop);
                 var session = SpatialCalibrationSession.Begin(
-                    descriptor, target, SpatialCalibrationTemplate.SupportedBy, "back", "top");
+                    descriptor, target, SpatialCalibrationTemplate.SupportedBy, "flat", "top");
                 try
                 {
-                    Assert.That(session.Rules.Single().frame_id, Is.EqualTo("back"));
+                    Assert.That(session.Rules.Single().frame_id, Is.EqualTo("flat"));
                     Assert.That(Vector3.Dot(
-                        session.SubjectObject.transform.TransformDirection(session.Frame("back").localNormal).normalized,
+                        session.SubjectObject.transform.TransformDirection(session.Frame("flat").localNormal).normalized,
                         Vector3.down), Is.GreaterThan(0.999f));
+                    Assert.That(session.SubjectObject.GetComponentInChildren<Renderer>().bounds.size.y,
+                        Is.EqualTo(0.2f).Within(1e-4f),
+                        "Flat intent must put the reviewed compound OBB's thinnest axis in world Y.");
                     var report = SpatialCalibrationValidator.Validate(session);
                     Assert.That(report.error_count, Is.Zero, string.Join("\n", report.errors));
                     paths = SpatialContractIO.WriteDrafts(session, report, new SpatialCaptureSet
@@ -214,7 +221,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
                         capture_set_hash = "flat-capture"
                     });
                     var interaction = SpatialContractIO.Load(paths.Single(path => path.EndsWith(".interaction.json")));
-                    Assert.That(interaction.interaction.subject_frame, Is.EqualTo("back"));
+                    Assert.That(interaction.interaction.subject_frame, Is.EqualTo("flat"));
                     Assert.That(interaction.interaction.target_frame, Is.EqualTo("top"));
 
                     session.ConfigureSupportedByFrames("bottom", "top");

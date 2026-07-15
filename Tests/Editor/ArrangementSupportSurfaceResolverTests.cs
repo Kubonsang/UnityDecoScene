@@ -7,6 +7,34 @@ namespace UnityDecoScene.DungeonDecorator.Tests
     public sealed class ArrangementSupportSurfaceResolverTests
     {
         [Test]
+        public void FlatFrameAndOppositeSurfaceUseCompoundObbThinnestAxis()
+        {
+            var geometry = new DecorGeometryProfile
+            {
+                source = GeometrySource.Collider,
+                reviewed = true,
+                collisionProxies =
+                {
+                    new OrientedBoxProxy("book", Vector3.zero,
+                        new Vector3(0.2f, 0.5f, 0.355f), Quaternion.identity)
+                }
+            };
+            geometry.Normalize();
+
+            var flat = geometry.Frame("flat");
+            Assert.That(flat, Is.Not.Null);
+            Assert.That(Mathf.Abs(Vector3.Dot(flat.localNormal, Vector3.right)), Is.EqualTo(1f).Within(1e-4f));
+            Assert.That(flat.size.x, Is.EqualTo(0.5f).Within(1e-4f));
+            Assert.That(flat.size.y, Is.EqualTo(0.355f).Within(1e-4f));
+            Assert.That(ArrangementSupportSurfaceResolver.TryResolveOppositeFrame(
+                    geometry, "flat", "top", out var opposite, out var code), Is.True, code);
+            Assert.That(Vector3.Dot(opposite.Frame.localNormal, flat.localNormal),
+                Is.EqualTo(-1f).Within(1e-4f));
+            Assert.That(Vector3.Distance(opposite.Frame.localPoint, flat.localPoint),
+                Is.EqualTo(0.2f).Within(1e-4f));
+        }
+
+        [Test]
         public void CompoundOppositeBackSurfaceMatchesCalibrationAndRuntimeWithinTolerance()
         {
             var subjectPrefab = GameObject.CreatePrimitive(PrimitiveType.Cube);

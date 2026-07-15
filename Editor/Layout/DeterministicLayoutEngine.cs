@@ -473,6 +473,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             arrangementId = source.arrangementId,
             affinityGroup = source.affinityGroup,
             supportPlacementId = source.supportPlacementId,
+            supportContactFrameId = source.supportContactFrameId,
             stackLevel = source.stackLevel,
             locked = source.locked
         };

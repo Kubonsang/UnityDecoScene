@@ -62,15 +62,16 @@ namespace UnityDecoScene.DungeonDecorator.Editor
     }
 
     /// <summary>
-    /// Canonical v0.1 resolver for reviewed support regions. A stacked asset is known to rest on
-    /// its reviewed back frame, so its support region is the parallel face opposite that frame.
+    /// Canonical v0.1 resolver for reviewed support regions. A stacked asset rests on the named
+    /// frame recorded by its approved interaction, so its support region is the parallel face
+    /// opposite that frame.
     /// Compound proxies determine the opposite plane while the human-reviewed frame owns its
     /// usable footprint. No Renderer/AABB or single-OBB fallback is permitted.
     /// </summary>
     internal static class ArrangementSupportSurfaceResolver
     {
         public const int ResolverVersion = SurfaceArrangementSpec.CurrentResolverVersion;
-        public const string ResolverHash = "2226ace083f82c6edb3be2cfacbea6c56b72defe76ff9c2819695950141d076c";
+        public const string ResolverHash = "c9dad4c7ea98354316eaa15f81b53defa3af0f63691b98b7bbfbfdbf853697c0";
         private const float Epsilon = 0.000001f;
 
         public static bool TryResolveReviewedFrame(
@@ -96,10 +97,19 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             string targetFrameId,
             out ArrangementSupportFrameResolution resolution,
             out string errorCode)
+            => TryResolveOppositeFrame(
+                geometry, sourceFrameId, targetFrameId, out resolution, out errorCode);
+
+        public static bool TryResolveOppositeFrame(
+            DecorGeometryProfile geometry,
+            string sourceFrameId,
+            string targetFrameId,
+            out ArrangementSupportFrameResolution resolution,
+            out string errorCode)
         {
             resolution = default;
             errorCode = SurfaceArrangementErrorCodes.SupportRegionInvalid;
-            if (!string.Equals(sourceFrameId, "back", StringComparison.OrdinalIgnoreCase) ||
+            if (string.IsNullOrWhiteSpace(sourceFrameId) ||
                 !string.Equals(targetFrameId, "top", StringComparison.OrdinalIgnoreCase) ||
                 !TryValidateGeometry(geometry)) return false;
             if (!TryCanonicalFrame(geometry.Frame(sourceFrameId), sourceFrameId, out var source)) return false;
@@ -123,7 +133,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             };
             if (!TryCanonicalFrame(frame, targetFrameId, out frame)) return false;
             var geometryHash = SpatialGeometryFamilyHasher.Compute(geometry);
-            resolution = BuildResolution(frame, geometryHash, "opposite:back>top");
+            resolution = BuildResolution(
+                frame,
+                geometryHash,
+                "opposite:" + sourceFrameId.Trim().ToLowerInvariant() + ">top");
             errorCode = null;
             return true;
         }
@@ -149,9 +162,20 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             Vector3 scale,
             out ArrangementSupportSurface surface,
             out string errorCode)
+            => TryResolveOppositeSurface(
+                geometry, "back", position, rotation, scale, out surface, out errorCode);
+
+        public static bool TryResolveOppositeSurface(
+            DecorGeometryProfile geometry,
+            string sourceFrameId,
+            Vector3 position,
+            Quaternion rotation,
+            Vector3 scale,
+            out ArrangementSupportSurface surface,
+            out string errorCode)
         {
             surface = default;
-            if (!TryResolveOppositeBackFrame(geometry, "back", "top", out var frame, out errorCode)) return false;
+            if (!TryResolveOppositeFrame(geometry, sourceFrameId, "top", out var frame, out errorCode)) return false;
             return TryTransform(frame, position, rotation, scale, out surface, out errorCode);
         }
 
@@ -221,6 +245,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var canonical = string.Join("|", new[]
             {
                 ResolverVersion.ToString(CultureInfo.InvariantCulture), ResolverHash, geometryHash, mode,
+                SpatialDerivedContactFrameResolver.ResolverVersion.ToString(CultureInfo.InvariantCulture),
+                SpatialDerivedContactFrameResolver.ResolverHash,
                 frame.frameId ?? string.Empty, Vector(frame.localPoint), Vector(frame.localNormal),
                 Vector(frame.localTangent), Vector(frame.size)
             });

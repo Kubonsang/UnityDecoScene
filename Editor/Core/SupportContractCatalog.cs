@@ -211,7 +211,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public string ComputeHash()
         {
-            var value = new StringBuilder("support-contract-catalog@1");
+            var value = new StringBuilder("support-contract-catalog@1")
+                .Append("|derived-contact-frame@")
+                .Append(SpatialDerivedContactFrameResolver.ResolverVersion)
+                .Append(':').Append(SpatialDerivedContactFrameResolver.ResolverHash);
             foreach (var asset in assets.Values.OrderBy(item => item.DescriptorId, StringComparer.Ordinal))
             {
                 value.Append('|').Append(asset.DescriptorId)

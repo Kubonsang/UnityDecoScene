@@ -175,6 +175,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 .Select(value => string.Join("|",
                     value.placementId ?? string.Empty,
                     value.supportPlacementId ?? string.Empty,
+                    value.supportContactFrameId ?? string.Empty,
                     value.stackLevel.ToString(CultureInfo.InvariantCulture),
                     Vector(value.position),
                     Rotation(value.rotation),

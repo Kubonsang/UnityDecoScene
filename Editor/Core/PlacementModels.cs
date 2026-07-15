@@ -24,6 +24,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string arrangementId;
         public string affinityGroup;
         public string supportPlacementId;
+        public string supportContactFrameId;
         public int stackLevel;
         public bool locked;
         [NonSerialized] public GameObject previewObject;

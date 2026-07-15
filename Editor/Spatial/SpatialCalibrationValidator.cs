@@ -48,8 +48,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var gap = Mathf.Max(0f, signedDistance);
             var penetration = Mathf.Max(0f, -signedDistance);
             var alignment = Vector3.Dot(normal, -surface.Normal);
-            var width = Mathf.Abs(frame.size.x * subject.lossyScale.x);
-            var height = Mathf.Abs(frame.size.y * Mathf.Max(subject.lossyScale.y, subject.lossyScale.z));
+            var frameTangent = Vector3.ProjectOnPlane(frame.localTangent, frame.localNormal).normalized;
+            var frameBitangent = Vector3.Cross(frameTangent, frame.localNormal).normalized;
+            var worldTangent = subject.TransformVector(frameTangent * frame.size.x);
+            var worldBitangent = subject.TransformVector(frameBitangent * frame.size.y);
+            var width = Mathf.Abs(Vector3.Dot(worldTangent, surface.Tangent)) +
+                        Mathf.Abs(Vector3.Dot(worldBitangent, surface.Tangent));
+            var height = Mathf.Abs(Vector3.Dot(worldTangent, surface.Bitangent)) +
+                         Mathf.Abs(Vector3.Dot(worldBitangent, surface.Bitangent));
             var delta = point - surface.Origin;
             var horizontal = Mathf.Abs(Vector3.Dot(delta, surface.Tangent));
             var vertical = Mathf.Abs(Vector3.Dot(delta, surface.Bitangent));

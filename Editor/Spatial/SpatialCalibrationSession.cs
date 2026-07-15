@@ -198,7 +198,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (Template != SpatialCalibrationTemplate.SupportedBy || TargetGeometry == null)
                 throw new InvalidOperationException("A SupportedBy target geometry profile is required.");
             NormalizeTargetFrame(targetFrameId);
-            if (!ArrangementSupportSurfaceResolver.TryResolveOppositeBackFrame(
+            if (!ArrangementSupportSurfaceResolver.TryResolveOppositeFrame(
                     TargetGeometry, sourceFrameId, targetFrameId, out var resolution, out var errorCode))
                 throw new InvalidOperationException(
                     $"{errorCode ?? SurfaceArrangementErrorCodes.SupportRegionInvalid}: reviewed opposite support frame is invalid.");
@@ -380,7 +380,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var frame = geometry?.Frame(id);
             if (frame == null)
                 throw new ArgumentOutOfRangeException(nameof(id), id,
-                    $"The {owner} contact frame must be bottom, back, or top.");
+                    $"The {owner} contact frame '{id}' is missing or invalid for this geometry.");
             return frame;
         }
 
@@ -422,7 +422,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (string.Equals(value, "bottom", StringComparison.OrdinalIgnoreCase)) return "bottom";
             if (string.Equals(value, "back", StringComparison.OrdinalIgnoreCase)) return "back";
             if (string.Equals(value, "top", StringComparison.OrdinalIgnoreCase)) return "top";
-            throw new ArgumentOutOfRangeException(nameof(value), value, "SupportedBy subject frame must be bottom, back, or top.");
+            if (string.Equals(value, SpatialDerivedContactFrameResolver.FlatFrameId, StringComparison.OrdinalIgnoreCase))
+                return SpatialDerivedContactFrameResolver.FlatFrameId;
+            throw new ArgumentOutOfRangeException(
+                nameof(value), value, "SupportedBy subject frame must be bottom, back, top, or flat.");
         }
 
         private static string NormalizeTargetFrame(string value)

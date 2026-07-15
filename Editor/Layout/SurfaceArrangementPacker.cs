@@ -278,6 +278,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 bounds,
                 boxes,
                 support,
+                interaction.subject_frame,
                 contactPoint + surface.Normal * gap,
                 gap,
                 coverage,
@@ -298,8 +299,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     placement.descriptor.Geometry, frameId, placement.position, placement.rotation, placement.scale,
                     out surface, out _);
             else
-                resolved = ArrangementSupportSurfaceResolver.TryResolveOppositeBackSurface(
-                    placement.descriptor.Geometry, placement.position, placement.rotation, placement.scale,
+                resolved = ArrangementSupportSurfaceResolver.TryResolveOppositeSurface(
+                    placement.descriptor.Geometry,
+                    string.IsNullOrWhiteSpace(placement.supportContactFrameId)
+                        ? "back"
+                        : placement.supportContactFrameId,
+                    placement.position, placement.rotation, placement.scale,
                     out surface, out _);
             return resolved && Vector3.Dot(surface.Normal, Vector3.up) >= 0.95f;
         }
@@ -375,6 +380,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 arrangementId = spec.arrangement_id,
                 affinityGroup = task.Member.affinity_group,
                 supportPlacementId = candidate.Support.placementId,
+                supportContactFrameId = candidate.SupportContactFrameId,
                 stackLevel = level
             };
         }
@@ -484,9 +490,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             public Vector3 Position; public Quaternion Rotation; public Vector3 Scale; public Bounds Bounds;
             public IReadOnlyList<WorldObb> Boxes; public PlacedDecorItem Support; public Vector3 ContactPoint;
+            public string SupportContactFrameId;
             public float Gap, Coverage, X, Y, RotationVariation, Score;
-            public ArrangementCandidate(Vector3 position, Quaternion rotation, Vector3 scale, Bounds bounds, IReadOnlyList<WorldObb> boxes, PlacedDecorItem support, Vector3 contactPoint, float gap, float coverage, float x, float y, float rotationVariation)
-            { Position = position; Rotation = rotation; Scale = scale; Bounds = bounds; Boxes = boxes; Support = support; ContactPoint = contactPoint; Gap = gap; Coverage = coverage; X = x; Y = y; RotationVariation = rotationVariation; Score = 0f; }
+            public ArrangementCandidate(Vector3 position, Quaternion rotation, Vector3 scale, Bounds bounds, IReadOnlyList<WorldObb> boxes, PlacedDecorItem support, string supportContactFrameId, Vector3 contactPoint, float gap, float coverage, float x, float y, float rotationVariation)
+            { Position = position; Rotation = rotation; Scale = scale; Bounds = bounds; Boxes = boxes; Support = support; SupportContactFrameId = supportContactFrameId; ContactPoint = contactPoint; Gap = gap; Coverage = coverage; X = x; Y = y; RotationVariation = rotationVariation; Score = 0f; }
         }
     }
 }

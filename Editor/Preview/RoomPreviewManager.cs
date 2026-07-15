@@ -369,6 +369,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             arrangementId = source.arrangementId,
             affinityGroup = source.affinityGroup,
             supportPlacementId = source.supportPlacementId,
+            supportContactFrameId = source.supportContactFrameId,
             stackLevel = source.stackLevel,
             locked = true
         };
@@ -385,7 +386,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             var text = new StringBuilder("arrangement-support-resolver@")
                 .Append(ArrangementSupportSurfaceResolver.ResolverVersion)
-                .Append(':').Append(ArrangementSupportSurfaceResolver.ResolverHash).Append('|');
+                .Append(':').Append(ArrangementSupportSurfaceResolver.ResolverHash)
+                .Append("|derived-contact-frame@")
+                .Append(SpatialDerivedContactFrameResolver.ResolverVersion)
+                .Append(':').Append(SpatialDerivedContactFrameResolver.ResolverHash).Append('|');
             foreach (var descriptor in plan.Catalog.Assets.Where(value => value?.Geometry != null).OrderBy(value => value.AssetId, StringComparer.Ordinal))
             {
                 var geometry = descriptor.Geometry;

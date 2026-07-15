@@ -45,13 +45,18 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             "위/아래 면 · Local Up"
         };
 
-        private static readonly string[] SupportedBySubjectFrames = { "bottom", "back", "top" };
+        private static readonly string[] SupportedBySubjectFrames = { "bottom", "back", "top", "flat" };
         private static readonly List<string> SupportedBySubjectFrameLabels = new()
         {
             "바닥면 · bottom (기본)",
             "뒷면 · back (책을 눕힐 때)",
             "윗면 · top (뒤집어 놓을 때)"
         };
+
+        static SpatialCalibrationWindow()
+        {
+            SupportedBySubjectFrameLabels.Add("가장 얇은 면으로 눕힘 · flat");
+        }
 
         [SerializeField] private DecorAssetDescriptor descriptor;
         [SerializeField] private DecorAssetDescriptor targetDescriptor;
@@ -756,6 +761,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             DrawFrame(transform, session.Frame("bottom"), Color.green);
             DrawFrame(transform, session.Frame("back"), new Color(1f, 0.55f, 0.1f));
             DrawFrame(transform, session.Frame("top"), new Color(0.2f, 0.65f, 1f));
+            var flatFrame = session.Frame(SpatialDerivedContactFrameResolver.FlatFrameId);
+            if (flatFrame != null)
+                DrawFrame(transform, flatFrame, new Color(0.15f, 0.9f, 0.85f));
             if (session.Template == SpatialCalibrationTemplate.SupportedBy && session.TargetObject != null)
             {
                 DrawFrame(session.TargetObject.transform, session.TargetFrame("top"), new Color(0.9f, 0.25f, 0.9f));
