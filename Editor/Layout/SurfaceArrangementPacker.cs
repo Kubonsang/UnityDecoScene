@@ -108,7 +108,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             }
 
             var tasks = new List<ItemTask>();
-            var resolvedCounts = ResolveCounts(spec);
+            var resolvedCounts = SurfaceArrangementPlacementRules.ResolveCounts(spec);
             foreach (var member in spec.members.OrderBy(value => value.descriptor_id, StringComparer.Ordinal))
             {
                 var descriptor = request.Plan.Catalog.Find(member.descriptor_id);
@@ -122,7 +122,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     Gap(result, spec, code, $"{descriptor.AssetId} -> {target.descriptor.AssetId}", member.minimum_count);
                     return;
                 }
-                var count = resolvedCounts[member];
+                var count = resolvedCounts[member.descriptor_id.Trim()];
                 var frame = descriptor.Geometry.Frame(baseContract.Interaction.subject_frame);
                 var area = frame == null ? 0f : frame.size.x * frame.size.y;
                 for (var index = 0; index < count; index++)
@@ -147,6 +147,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 var sawOverlap = false;
                 var sawBounds = false;
                 var sawStackSupport = false;
+                var sawInvalidSupportRegion = false;
                 string supportContractIssue = null;
                 foreach (var support in supports)
                 {
@@ -155,7 +156,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                         if (support != target) supportContractIssue = supportCode ?? SurfaceArrangementErrorCodes.SupportContractMissing;
                         continue;
                     }
-                    if (!TrySupportSurface(support, contract.Interaction.target_frame, out var surface)) continue;
+                    if (!TrySupportSurface(support, contract.Interaction.target_frame, out var surface))
+                    {
+                        sawInvalidSupportRegion = true;
+                        continue;
+                    }
                     var stacked = support != target;
                     if (stacked && support.stackLevel >= spec.max_stack_height) continue;
                     for (var attempt = 0; attempt < CandidateAttempts; attempt++)
@@ -174,15 +179,17 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 if (!best.HasValue)
                 {
                     if (!task.Required) continue;
-                    var code = sawOverlap
-                        ? SurfaceArrangementErrorCodes.Overlap
-                        : sawBounds
-                            ? SurfaceArrangementErrorCodes.OutOfBounds
-                            : !string.IsNullOrWhiteSpace(supportContractIssue)
-                                ? supportContractIssue
-                                : sawStackSupport
-                                    ? SurfaceArrangementErrorCodes.StackSupportInsufficient
-                                    : SurfaceArrangementErrorCodes.NoFit;
+                    var code = sawInvalidSupportRegion
+                        ? SurfaceArrangementErrorCodes.SupportRegionInvalid
+                        : sawOverlap
+                            ? SurfaceArrangementErrorCodes.Overlap
+                            : sawBounds
+                                ? SurfaceArrangementErrorCodes.OutOfBounds
+                                : !string.IsNullOrWhiteSpace(supportContractIssue)
+                                    ? supportContractIssue
+                                    : sawStackSupport
+                                        ? SurfaceArrangementErrorCodes.StackSupportInsufficient
+                                        : SurfaceArrangementErrorCodes.NoFit;
                     Gap(result, spec, code, $"required {task.Descriptor.AssetId} instance {task.InstanceIndex} did not fit", 1);
                     continue;
                 }
@@ -196,7 +203,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             int taskIndex,
             int taskCount,
             PlacedDecorItem support,
-            SupportSurface surface,
+            ArrangementSupportSurface surface,
             InteractionSpatialContractPayload interaction,
             int seed,
             int attempt,
@@ -280,62 +287,21 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return true;
         }
 
-        private static bool TrySupportSurface(PlacedDecorItem placement, string frameId, out SupportSurface surface)
+        private static bool TrySupportSurface(PlacedDecorItem placement, string frameId, out ArrangementSupportSurface surface)
         {
             surface = default;
-            if (placement?.descriptor?.Geometry == null || !string.Equals(frameId, "top", StringComparison.OrdinalIgnoreCase)) return false;
+            if (placement?.descriptor?.Geometry == null ||
+                !string.Equals(frameId, "top", StringComparison.OrdinalIgnoreCase)) return false;
+            bool resolved;
             if (string.IsNullOrWhiteSpace(placement.arrangementId))
-            {
-                var frame = placement.descriptor.Geometry.Frame(frameId);
-                if (frame == null) return false;
-                var normal = (placement.rotation * frame.localNormal).normalized;
-                if (Vector3.Dot(normal, Vector3.up) < 0.95f) return false;
-                var localTangent = frame.localTangent.sqrMagnitude < 0.001f ? Vector3.right : frame.localTangent.normalized;
-                var localBitangent = Vector3.Cross(frame.localNormal.normalized, localTangent).normalized;
-                var tangentVector = placement.rotation * Vector3.Scale(localTangent * frame.size.x, placement.scale);
-                var bitangentVector = placement.rotation * Vector3.Scale(localBitangent * frame.size.y, placement.scale);
-                var frameTangent = Vector3.ProjectOnPlane(tangentVector, normal).normalized;
-                var frameBitangent = Vector3.ProjectOnPlane(bitangentVector, normal).normalized;
-                if (frameTangent.sqrMagnitude < 0.9f || frameBitangent.sqrMagnitude < 0.9f) return false;
-                surface = new SupportSurface(
-                    frameId,
-                    placement.position + placement.rotation * Vector3.Scale(frame.localPoint, placement.scale),
-                    normal,
-                    frameTangent,
-                    frameBitangent,
-                    new Vector2(tangentVector.magnitude, bitangentVector.magnitude));
-                return surface.Size.x > 0.001f && surface.Size.y > 0.001f;
-            }
-            WorldObb? best = null;
-            var bestHeight = float.NegativeInfinity;
-            var bestArea = 0f;
-            foreach (var box in SpatialGeometryUtility.BuildWorldObbs(placement.descriptor, placement.position, placement.rotation, placement.scale))
-            for (var axisIndex = 0; axisIndex < 3; axisIndex++)
-            {
-                var axis = box.Axis(axisIndex);
-                var alignment = Mathf.Abs(Vector3.Dot(axis, Vector3.up));
-                if (alignment < 0.95f) continue;
-                var sign = Vector3.Dot(axis, Vector3.up) >= 0f ? 1f : -1f;
-                var height = (box.Center + axis * sign * box.Extent(axisIndex)).y;
-                var other = Enumerable.Range(0, 3).Where(value => value != axisIndex).ToArray();
-                var area = box.Extent(other[0]) * box.Extent(other[1]) * 4f;
-                if (height > bestHeight + 0.005f || Mathf.Abs(height - bestHeight) <= 0.005f && area > bestArea)
-                { best = box; bestHeight = height; bestArea = area; }
-            }
-            if (!best.HasValue) return false;
-            var chosen = best.Value;
-            var verticalAxis = Enumerable.Range(0, 3).OrderByDescending(value => Mathf.Abs(Vector3.Dot(chosen.Axis(value), Vector3.up))).First();
-            var planar = Enumerable.Range(0, 3).Where(value => value != verticalAxis).ToArray();
-            var tangent = chosen.Axis(planar[0]);
-            tangent = Vector3.ProjectOnPlane(tangent, Vector3.up).normalized;
-            if (tangent.sqrMagnitude < 0.9f) return false;
-            var bitangent = Vector3.Cross(Vector3.up, tangent).normalized;
-            var extentA = chosen.Extent(planar[0]);
-            var extentB = chosen.Extent(planar[1]);
-            var signUp = Vector3.Dot(chosen.Axis(verticalAxis), Vector3.up) >= 0f ? 1f : -1f;
-            var origin = chosen.Center + chosen.Axis(verticalAxis) * signUp * chosen.Extent(verticalAxis);
-            surface = new SupportSurface("top", origin, Vector3.up, tangent, bitangent, new Vector2(extentA * 2f, extentB * 2f));
-            return surface.Size.x > 0.001f && surface.Size.y > 0.001f;
+                resolved = ArrangementSupportSurfaceResolver.TryResolveReviewedSurface(
+                    placement.descriptor.Geometry, frameId, placement.position, placement.rotation, placement.scale,
+                    out surface, out _);
+            else
+                resolved = ArrangementSupportSurfaceResolver.TryResolveOppositeBackSurface(
+                    placement.descriptor.Geometry, placement.position, placement.rotation, placement.scale,
+                    out surface, out _);
+            return resolved && Vector3.Dot(surface.Normal, Vector3.up) >= 0.95f;
         }
 
         private static bool InsideRoom(LayoutRequest request, ArrangementCandidate candidate)
@@ -421,30 +387,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return descriptor.Roles.Count > 0 ? descriptor.Roles[0] : DecorRole.Clutter;
         }
 
-        private static Dictionary<SurfaceArrangementMemberSpec, int> ResolveCounts(SurfaceArrangementSpec spec)
-        {
-            var members = spec.members.Where(value => value != null)
-                .OrderBy(value => value.descriptor_id, StringComparer.Ordinal).ToArray();
-            var result = members.ToDictionary(value => value, value => value.minimum_count);
-            var available = members.Sum(value => value.maximum_count - value.minimum_count);
-            var desired = Mathf.Clamp(Mathf.RoundToInt(available * spec.Amount), 0, available);
-            for (var slot = 0; slot < desired; slot++)
-            {
-                var selected = members
-                    .Where(value => value.selection_weight > 0f && result[value] < value.maximum_count)
-                    .OrderByDescending(value => value.selection_weight / (result[value] - value.minimum_count + 1f))
-                    .ThenBy(value => value.descriptor_id, StringComparer.Ordinal)
-                    .FirstOrDefault();
-                if (selected == null) break;
-                result[selected]++;
-            }
-            return result;
-        }
-
         private static string PlacementId(SurfaceArrangementSpec spec, ItemTask task) =>
             $"arrangement:{spec.arrangement_id}:{task.Descriptor.AssetId}:{task.InstanceIndex}";
 
-        private static void Footprint(ContactFrame frame, Quaternion rotation, Vector3 scale, SupportSurface surface, out float halfWidth, out float halfHeight)
+        private static void Footprint(ContactFrame frame, Quaternion rotation, Vector3 scale, ArrangementSupportSurface surface, out float halfWidth, out float halfHeight)
         {
             var tangent = frame.localTangent.sqrMagnitude < 0.001f ? Vector3.right : frame.localTangent.normalized;
             var normal = frame.localNormal.sqrMagnitude < 0.001f ? Vector3.down : frame.localNormal.normalized;
@@ -533,12 +479,6 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             public readonly int InstanceIndex; public readonly bool Required; public readonly float Area;
             public ItemTask(SurfaceArrangementMemberSpec member, DecorAssetDescriptor descriptor, int index, bool required, float area)
             { Member = member; Descriptor = descriptor; InstanceIndex = index; Required = required; Area = area; }
-        }
-        private readonly struct SupportSurface
-        {
-            public readonly string FrameId; public readonly Vector3 Origin, Normal, Tangent, Bitangent; public readonly Vector2 Size;
-            public SupportSurface(string id, Vector3 origin, Vector3 normal, Vector3 tangent, Vector3 bitangent, Vector2 size)
-            { FrameId = id; Origin = origin; Normal = normal; Tangent = tangent; Bitangent = bitangent; Size = size; }
         }
         private struct ArrangementCandidate
         {

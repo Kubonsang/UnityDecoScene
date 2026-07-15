@@ -9,7 +9,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 {
     public static class PreviewValidationService
     {
-        public const string ValidationVersion = "room-validator-4-surface-arrangement";
+        public const string ValidationVersion = "room-validator-5-arrangement-structure";
 
         public static ValidationReport Validate(PreviewSession session)
         {
@@ -34,6 +34,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             }
 
             ValidateAuthoringContext(session, report);
+            ValidateArrangementStructure(session, report);
 
             for (var i = 0; i < session.Placements.Count; i++)
             {
@@ -160,6 +161,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 report.issues.Add(new ValidationIssue(RoomAuthoringErrorCodes.GeometryUnreviewed, ValidationSeverity.Error,
                     $"Room obstacle '{ObstacleName(obstacle)}' has no reviewed compound OBB geometry.", obstacle.stableId));
             }
+        }
+
+        private static void ValidateArrangementStructure(PreviewSession session, ValidationReport report)
+        {
+            if (session?.Plan == null) return;
+            var analysis = SurfaceArrangementPlacementRules.Analyze(session.Plan, session.Placements);
+            report.issues.AddRange(analysis.Issues);
         }
 
         private static void ValidateRoomObstacles(PreviewSession session, PlacedDecorItem item, ValidationReport report)

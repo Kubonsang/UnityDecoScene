@@ -198,29 +198,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (Template != SpatialCalibrationTemplate.SupportedBy || TargetGeometry == null)
                 throw new InvalidOperationException("A SupportedBy target geometry profile is required.");
             NormalizeTargetFrame(targetFrameId);
-            var source = TargetFrame(sourceFrameId);
-            var sourceNormal = NormalizeOr(source.localNormal, DefaultNormal(sourceFrameId));
-            var oppositeNormal = -sourceNormal;
-            var tangent = NormalizeOr(
-                Vector3.ProjectOnPlane(source.localTangent, oppositeNormal),
-                DefaultTangent(oppositeNormal));
-            var maximumProjection = TargetGeometry.collisionProxies
-                .Where(proxy => proxy != null)
-                .SelectMany(ProxyCorners)
-                .Select(point => Vector3.Dot(point, oppositeNormal))
-                .DefaultIfEmpty(Vector3.Dot(source.localPoint, oppositeNormal))
-                .Max();
-            var sourceProjection = Vector3.Dot(source.localPoint, oppositeNormal);
-            TargetGeometry.topContact = new ContactFrame
-            {
-                frameId = "top",
-                localPoint = source.localPoint + oppositeNormal * (maximumProjection - sourceProjection),
-                localNormal = oppositeNormal,
-                localTangent = tangent,
-                size = new Vector2(
-                    Mathf.Max(0.001f, Mathf.Abs(source.size.x)),
-                    Mathf.Max(0.001f, Mathf.Abs(source.size.y)))
-            };
+            if (!ArrangementSupportSurfaceResolver.TryResolveOppositeBackFrame(
+                    TargetGeometry, sourceFrameId, targetFrameId, out var resolution, out var errorCode))
+                throw new InvalidOperationException(
+                    $"{errorCode ?? SurfaceArrangementErrorCodes.SupportRegionInvalid}: reviewed opposite support frame is invalid.");
+            TargetGeometry.topContact = resolution.Frame;
             SupportedByTargetFrameId = "top";
             NotifyChanged();
         }
@@ -384,26 +366,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static SpatialCalibrationSurface SurfaceFromFrame(Transform transform, ContactFrame frame)
         {
-            var normal = NormalizeOr(transform.TransformDirection(frame.localNormal), Vector3.up);
-            var tangent = Vector3.ProjectOnPlane(transform.TransformDirection(frame.localTangent), normal);
-            tangent = NormalizeOr(tangent, DefaultTangent(normal));
-
-            var localNormal = NormalizeOr(frame.localNormal, Vector3.up);
-            var localTangent = NormalizeOr(
-                Vector3.ProjectOnPlane(frame.localTangent, localNormal),
-                DefaultTangent(localNormal));
-            var localBitangent = Vector3.Cross(localTangent, localNormal).normalized;
-            var bitangent = Vector3.ProjectOnPlane(transform.TransformDirection(localBitangent), normal);
-            bitangent = NormalizeOr(bitangent, Vector3.Cross(tangent, normal));
-
-            var width = transform.TransformVector(localTangent * frame.size.x).magnitude;
-            var height = transform.TransformVector(localBitangent * frame.size.y).magnitude;
+            if (!ArrangementSupportSurfaceResolver.TryTransformFrame(
+                    frame, transform.position, transform.rotation, transform.lossyScale,
+                    out var surface, out var errorCode))
+                throw new InvalidOperationException(
+                    $"{errorCode ?? SurfaceArrangementErrorCodes.SupportRegionInvalid}: contact frame transform is invalid.");
             return new SpatialCalibrationSurface(
-                transform.TransformPoint(frame.localPoint),
-                normal,
-                tangent,
-                bitangent,
-                new Vector2(Mathf.Max(0.001f, width), Mathf.Max(0.001f, height)));
+                surface.Origin, surface.Normal, surface.Tangent, surface.Bitangent, surface.Size);
         }
 
         private static ContactFrame RequireFrame(DecorGeometryProfile geometry, string id, string owner)
@@ -430,21 +399,6 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             destination.localNormal = source.localNormal;
             destination.localTangent = source.localTangent;
             destination.size = source.size;
-        }
-
-        private static IEnumerable<Vector3> ProxyCorners(OrientedBoxProxy proxy)
-        {
-            var extents = new Vector3(
-                Mathf.Abs(proxy.size.x),
-                Mathf.Abs(proxy.size.y),
-                Mathf.Abs(proxy.size.z)) * 0.5f;
-            for (var x = -1; x <= 1; x += 2)
-            for (var y = -1; y <= 1; y += 2)
-            for (var z = -1; z <= 1; z += 2)
-                yield return proxy.localCenter + proxy.localRotation * new Vector3(
-                    extents.x * x,
-                    extents.y * y,
-                    extents.z * z);
         }
 
         private static Vector3 DefaultNormal(string frameId) =>

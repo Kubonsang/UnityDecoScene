@@ -33,11 +33,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (request == null) throw new ArgumentNullException(nameof(request));
             var plan = request.Plan;
             if (plan == null) throw new ArgumentNullException(nameof(plan));
-            var locked = request.LockedPlacements != null
-                ? request.LockedPlacements.Where(item => item != null && item.locked).Select(CloneForRegeneration).ToArray()
-                : preserveLocks && Current != null
-                    ? Current.Placements.Where(item => item.locked).Select(CloneForRegeneration).ToArray()
-                    : Array.Empty<PlacedDecorItem>();
+            IReadOnlyList<PlacedDecorItem> lockSource;
+            if (request.LockedPlacements != null) lockSource = request.LockedPlacements;
+            else if (preserveLocks && Current != null) lockSource = Current.Placements;
+            else lockSource = Array.Empty<PlacedDecorItem>();
+            var locked = BuildCompatibleRegenerationLocks(plan, lockSource);
             var effectiveRequest = new LayoutRequest(plan, locked, request.AuthoringContext, request.SupportContracts);
 
             DiscardPreview(false, plan);
@@ -147,6 +147,43 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 .Where(value => value != null && !string.Equals(value.arrangementId, arrangementId.Trim(), StringComparison.Ordinal))
                 .Select(CloneForRegeneration)
                 .ToArray();
+        }
+
+        internal static IReadOnlyList<PlacedDecorItem> BuildCompatibleRegenerationLocks(
+            RoomCompositionPlan plan,
+            IReadOnlyList<PlacedDecorItem> placements)
+        {
+            if (plan == null) throw new ArgumentNullException(nameof(plan));
+            var source = (placements ?? Array.Empty<PlacedDecorItem>()).Where(value => value != null).ToArray();
+            var analysis = SurfaceArrangementPlacementRules.Analyze(plan, source);
+            var byId = source.Where(value => !string.IsNullOrWhiteSpace(value.placementId))
+                .GroupBy(value => value.placementId, StringComparer.Ordinal)
+                .ToDictionary(value => value.Key, value => value.ToArray(), StringComparer.Ordinal);
+            return source
+                .Where(value => value.locked &&
+                                (string.IsNullOrWhiteSpace(value.arrangementId) ||
+                                 analysis.CompatiblePlacements.Contains(value) &&
+                                 HasFullyLockedSupportChain(value, byId, analysis.CompatiblePlacements)))
+                .Select(CloneForRegeneration)
+                .ToArray();
+        }
+
+        private static bool HasFullyLockedSupportChain(
+            PlacedDecorItem placement,
+            IReadOnlyDictionary<string, PlacedDecorItem[]> byId,
+            ISet<PlacedDecorItem> compatiblePlacements)
+        {
+            var visited = new HashSet<PlacedDecorItem>();
+            var current = placement;
+            while (!string.IsNullOrWhiteSpace(current?.arrangementId))
+            {
+                if (!current.locked || !compatiblePlacements.Contains(current) || !visited.Add(current) ||
+                    string.IsNullOrWhiteSpace(current.supportPlacementId) ||
+                    !byId.TryGetValue(current.supportPlacementId, out var supports) || supports.Length != 1)
+                    return false;
+                current = supports[0];
+            }
+            return current?.locked == true;
         }
 
         public static bool SetLocked(IEnumerable<string> placementIds, bool locked)
@@ -344,16 +381,33 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return Hash128.Compute(text.ToString()).ToString();
         }
 
-        private static string ComputeGeometryHash(RoomCompositionPlan plan, SupportContractCatalog supportContracts)
+        internal static string ComputeGeometryHash(RoomCompositionPlan plan, SupportContractCatalog supportContracts)
         {
-            var text = new StringBuilder();
+            var text = new StringBuilder("arrangement-support-resolver@")
+                .Append(ArrangementSupportSurfaceResolver.ResolverVersion)
+                .Append(':').Append(ArrangementSupportSurfaceResolver.ResolverHash).Append('|');
             foreach (var descriptor in plan.Catalog.Assets.Where(value => value?.Geometry != null).OrderBy(value => value.AssetId, StringComparer.Ordinal))
             {
-                text.Append(descriptor.AssetId).Append(':').Append(descriptor.Geometry.dependencyHash).Append(':').Append(descriptor.Geometry.reviewed ? '1' : '0');
-                foreach (var rules in descriptor.Geometry.EffectiveContacts)
-                    text.Append(':').Append(rules.ruleId).Append('/').Append(rules.requirement).Append('/').Append(rules.frameId)
-                        .Append('/').Append(rules.minimumGap.ToString("R", CultureInfo.InvariantCulture))
-                        .Append('/').Append(rules.maximumGap.ToString("R", CultureInfo.InvariantCulture));
+                var geometry = descriptor.Geometry;
+                text.Append("asset:").Append(descriptor.AssetId ?? string.Empty)
+                    .Append("/version:").Append(geometry.version)
+                    .Append("/source:").Append((int)geometry.source)
+                    .Append("/dependency:").Append(geometry.dependencyHash ?? string.Empty)
+                    .Append("/reviewed:").Append(geometry.reviewed ? '1' : '0')
+                    .Append("/confidence:").Append(Number(geometry.inferenceConfidence))
+                    .Append("/forward:").Append(Vector(geometry.forwardAxis))
+                    .Append("/up:").Append(Vector(geometry.upAxis))
+                    .Append("/pivot:").Append(Vector(geometry.pivotOffset));
+                foreach (var proxy in (geometry.collisionProxies ?? new List<OrientedBoxProxy>())
+                             .Where(value => value != null)
+                             .OrderBy(ProxyCanonical, StringComparer.Ordinal))
+                    text.Append("/obb:").Append(ProxyCanonical(proxy));
+                AppendFrame(text, "bottom", geometry.bottomContact);
+                AppendFrame(text, "back", geometry.backContact);
+                AppendFrame(text, "top", geometry.topContact);
+                foreach (var rules in geometry.EffectiveContacts.Where(value => value != null)
+                             .OrderBy(ContactCanonical, StringComparer.Ordinal))
+                    text.Append("/contact:").Append(ContactCanonical(rules));
                 text.Append('|');
             }
             foreach (var arrangement in plan.SurfaceArrangements.Where(value => value != null)
@@ -363,7 +417,54 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return Hash128.Compute(text.ToString()).ToString();
         }
 
-        private static string Vector(Vector3 value) => string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2:R}", value.x, value.y, value.z);
+        private static void AppendFrame(StringBuilder text, string slot, ContactFrame frame)
+        {
+            text.Append('/').Append(slot).Append(':');
+            if (frame == null)
+            {
+                text.Append("null");
+                return;
+            }
+            text.Append(frame.frameId ?? string.Empty).Append('@')
+                .Append(Vector(frame.localPoint)).Append('@')
+                .Append(Vector(frame.localNormal)).Append('@')
+                .Append(Vector(frame.localTangent)).Append('@')
+                .Append(Vector(frame.size));
+        }
+
+        private static string ProxyCanonical(OrientedBoxProxy proxy) =>
+            (proxy.proxyId ?? string.Empty) + "@" + Vector(proxy.localCenter) + "@" +
+            Vector(proxy.size) + "@" + QuaternionValue(proxy.localRotation);
+
+        private static string ContactCanonical(ContactRules rules) =>
+            (rules.ruleId ?? string.Empty) + "@" + (int)rules.requirement + "@" +
+            (rules.frameId ?? string.Empty) + "@" + Number(rules.minimumGap) + "@" +
+            Number(rules.maximumGap) + "@" + Number(rules.maximumPenetration) + "@" +
+            Number(rules.minimumSupportCoverage);
+
+        private static string Vector(Vector3 value) =>
+            Number(value.x) + "," + Number(value.y) + "," + Number(value.z);
+
+        private static string Vector(Vector2 value) => Number(value.x) + "," + Number(value.y);
+
+        private static string QuaternionValue(Quaternion value)
+        {
+            if (value == default) value = Quaternion.identity;
+            value.Normalize();
+            if (value.w < 0f || value.w == 0f &&
+                (value.z < 0f || value.z == 0f && (value.y < 0f || value.y == 0f && value.x < 0f)))
+                value = new Quaternion(-value.x, -value.y, -value.z, -value.w);
+            return Number(value.x) + "," + Number(value.y) + "," + Number(value.z) + "," + Number(value.w);
+        }
+
+        private static string Number(float value)
+        {
+            if (value == 0f) return "0";
+            if (float.IsNaN(value)) return "NaN";
+            if (float.IsPositiveInfinity(value)) return "+Infinity";
+            if (float.IsNegativeInfinity(value)) return "-Infinity";
+            return value.ToString("R", CultureInfo.InvariantCulture);
+        }
 
         private static bool Approximately(Vector3 left, Vector3 right) => (left - right).sqrMagnitude <= 0.00000001f;
 

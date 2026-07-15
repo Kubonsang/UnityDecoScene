@@ -57,8 +57,10 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             var baseline = Pack(fixture);
             var baselineB = ArrangementPlacements(baseline, fixture.SpecB.arrangement_id);
             var baselineHash = ArrangementPlacementHash(fixture, baseline, fixture.SpecB.arrangement_id);
-            var frozen = RoomPreviewManager.BuildArrangementRegenerationLocks(
-                baseline.Placements, fixture.SpecA.arrangement_id);
+            var frozen = RoomPreviewManager.BuildCompatibleRegenerationLocks(
+                fixture.Plan,
+                RoomPreviewManager.BuildArrangementRegenerationLocks(
+                    baseline.Placements, fixture.SpecA.arrangement_id));
 
             fixture.SpecA.members[0].minimum_count = 2;
             fixture.SpecA.members[0].maximum_count = 2;
@@ -74,6 +76,128 @@ namespace UnityDecoScene.DungeonDecorator.Tests
                 Is.EqualTo(baselineHash));
             Assert.That(regenerated.Placements.Select(value => value.placementId).Distinct(StringComparer.Ordinal).Count(),
                 Is.EqualTo(regenerated.Placements.Count), "Partial regeneration introduced duplicate placements.");
+        }
+
+        [Test]
+        public void GeneralLockPreservationDropsDeletedExcessAndBrokenArrangementPlacements()
+        {
+            var fixture = CreateFixture();
+            var baseline = Pack(fixture);
+            foreach (var placement in baseline.Placements.Where(value => !string.IsNullOrWhiteSpace(value.arrangementId)))
+                placement.locked = true;
+            fixture.TargetA.locked = true;
+            fixture.TargetB.locked = true;
+
+            // A's old descriptor was deleted from the spec. B now resolves two slots; one of those
+            // slots points at the wrong root and the third is beyond the new resolved count.
+            fixture.SpecA.members[0].descriptor_id = "replacement-token";
+            fixture.SpecB.members[0].minimum_count = 2;
+            fixture.SpecB.members[0].maximum_count = 2;
+            var b = ArrangementPlacements(baseline, fixture.SpecB.arrangement_id);
+            b[0].supportPlacementId = fixture.TargetB.placementId;
+            b[0].stackLevel = 1;
+            b[1].supportPlacementId = fixture.TargetA.placementId;
+            b[1].stackLevel = 1;
+
+            var preserved = RoomPreviewManager.BuildCompatibleRegenerationLocks(fixture.Plan, baseline.Placements);
+
+            Assert.That(preserved.Where(value => !string.IsNullOrWhiteSpace(value.arrangementId))
+                    .Select(value => value.placementId),
+                Is.EqualTo(new[] { b[0].placementId }));
+            Assert.That(preserved.Any(value => value.placementId == b[1].placementId), Is.False,
+                "A placement supported by another arrangement's target root was preserved.");
+            Assert.That(preserved.Any(value => value.placementId == b[2].placementId), Is.False,
+                "A placement beyond the descriptor's resolved count was preserved.");
+            Assert.That(preserved.Any(value => value.arrangementId == fixture.SpecA.arrangement_id), Is.False,
+                "A placement for a descriptor deleted from its arrangement spec was preserved.");
+        }
+
+        [Test]
+        public void GeneralLockPreservationRequiresTheEntireSupportChainToBeLocked()
+        {
+            var fixture = CreateFixture();
+            var baseline = Pack(fixture);
+            var b = ArrangementPlacements(baseline, fixture.SpecB.arrangement_id);
+            b[0].supportPlacementId = fixture.TargetB.placementId;
+            b[0].stackLevel = 1;
+            b[1].supportPlacementId = b[0].placementId;
+            b[1].stackLevel = 2;
+            b[2].supportPlacementId = b[1].placementId;
+            b[2].stackLevel = 3;
+            b[2].locked = true;
+
+            var childOnly = RoomPreviewManager.BuildCompatibleRegenerationLocks(fixture.Plan, baseline.Placements);
+
+            Assert.That(childOnly.Any(value => value.placementId == b[2].placementId), Is.False,
+                "A locked child must not survive while its regenerated support chain can move or disappear.");
+
+            fixture.TargetB.locked = true;
+            b[0].locked = true;
+            b[1].locked = true;
+            var fullChain = RoomPreviewManager.BuildCompatibleRegenerationLocks(fixture.Plan, baseline.Placements);
+
+            Assert.That(fullChain.Where(value => value.arrangementId == fixture.SpecB.arrangement_id)
+                    .Select(value => value.placementId),
+                Is.EqualTo(b.Select(value => value.placementId)));
+            Assert.That(fullChain.Any(value => value.placementId == fixture.TargetB.placementId), Is.True);
+        }
+
+        [Test]
+        public void ValidationRejectsResolvedCountWrongRootAndCyclicStackGraph()
+        {
+            var fixture = CreateFixture();
+            var result = Pack(fixture);
+            var b = ArrangementPlacements(result, fixture.SpecB.arrangement_id);
+            var extra = ClonePlacement(b[2]);
+            extra.placementId = $"arrangement:{fixture.SpecB.arrangement_id}:{fixture.Token.AssetId}:3";
+            extra.instanceIndex = 3;
+            extra.supportPlacementId = fixture.TargetB.placementId;
+            extra.stackLevel = 1;
+            result.Placements.Add(extra);
+            b[0].supportPlacementId = fixture.TargetA.placementId;
+            b[0].stackLevel = 1;
+            b[1].supportPlacementId = b[2].placementId;
+            b[1].stackLevel = 2;
+            b[2].supportPlacementId = b[1].placementId;
+            b[2].stackLevel = 3;
+
+            var report = PreviewValidationService.Validate(Session(fixture, result));
+
+            Assert.That(report.issues.Any(value => value.code == SurfaceArrangementErrorCodes.NoFit &&
+                                                   value.elementIds.Contains(extra.placementId)), Is.True,
+                "The descriptor's resolved-count overflow was not reported.");
+            Assert.That(report.issues.Any(value => value.code == SurfaceArrangementErrorCodes.SupportRegionInvalid &&
+                                                   value.elementIds.Contains(b[0].placementId)), Is.True,
+                "A support chain terminating at the wrong target root was not reported.");
+            Assert.That(report.issues.Any(value => value.code == SurfaceArrangementErrorCodes.StackSupportInsufficient &&
+                                                   (value.elementIds.Contains(b[1].placementId) ||
+                                                    value.elementIds.Contains(b[2].placementId))), Is.True,
+                "A cyclic same-arrangement stack graph was not reported.");
+        }
+
+        [Test]
+        public void GeometryProfileHashCoversObbsAxesPivotFramesAndContactRules()
+        {
+            var fixture = CreateFixture();
+            var previous = RoomPreviewManager.ComputeGeometryHash(fixture.Plan, fixture.SupportCatalog);
+
+            AssertHashChanges(() => fixture.Token.Geometry.collisionProxies[0].localCenter += Vector3.right * 0.01f);
+            AssertHashChanges(() => fixture.Token.Geometry.forwardAxis = Vector3.left);
+            AssertHashChanges(() => fixture.Token.Geometry.upAxis = Vector3.forward);
+            AssertHashChanges(() => fixture.Token.Geometry.pivotOffset += Vector3.up * 0.02f);
+            AssertHashChanges(() => fixture.Token.Geometry.bottomContact.localPoint += Vector3.up * 0.01f);
+            AssertHashChanges(() => fixture.Token.Geometry.backContact.localNormal = Vector3.left);
+            AssertHashChanges(() => fixture.Token.Geometry.topContact.size += Vector2.one * 0.03f);
+            AssertHashChanges(() => fixture.Token.Geometry.EffectiveContacts[0].maximumPenetration += 0.001f);
+            AssertHashChanges(() => fixture.Token.Geometry.EffectiveContacts[0].minimumSupportCoverage += 0.01f);
+
+            void AssertHashChanges(Action mutation)
+            {
+                mutation();
+                var current = RoomPreviewManager.ComputeGeometryHash(fixture.Plan, fixture.SupportCatalog);
+                Assert.That(current, Is.Not.EqualTo(previous));
+                previous = current;
+            }
         }
 
         [Test]
@@ -304,6 +428,29 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         private static PlacedDecorItem[] ArrangementPlacements(LayoutResult result, string arrangementId) =>
             result.Placements.Where(value => string.Equals(value.arrangementId, arrangementId, StringComparison.Ordinal))
                 .OrderBy(value => value.placementId, StringComparer.Ordinal).ToArray();
+
+        private static PlacedDecorItem ClonePlacement(PlacedDecorItem source) => new()
+        {
+            placementId = source.placementId,
+            elementId = source.elementId,
+            instanceIndex = source.instanceIndex,
+            role = source.role,
+            relation = source.relation,
+            descriptor = source.descriptor,
+            position = source.position,
+            rotation = source.rotation,
+            scale = source.scale,
+            worldBounds = source.worldBounds,
+            surfaceId = source.surfaceId,
+            contactEvidence = source.contactEvidence,
+            surfaceIds = new List<string>(source.surfaceIds),
+            contactEvidenceSet = new List<ContactEvidence>(source.contactEvidenceSet),
+            arrangementId = source.arrangementId,
+            affinityGroup = source.affinityGroup,
+            supportPlacementId = source.supportPlacementId,
+            stackLevel = source.stackLevel,
+            locked = source.locked
+        };
 
         private static void AssertPlacementsEqual(
             IReadOnlyList<PlacedDecorItem> expected,
