@@ -47,7 +47,9 @@ const tools = [
   tool("begin_spatial_calibration", "Open a non-persistent Unity PreviewSceneStage for a reviewed descriptor. This does not approve, apply, or write a contract.", {
     descriptorAssetPath: { type: "string", description: "Unity asset path to a DecorAssetDescriptor." },
     template: { type: "string", enum: ["WallMounted", "WallBackedFloorSupported", "FloorSupported", "SupportedBy"] },
-    targetPrefabPath: { type: "string", description: "Required only for SupportedBy." }
+    targetPrefabPath: { type: "string", description: "Required only for SupportedBy." },
+    subjectFrameId: { type: "string", enum: ["bottom", "back", "top"], description: "Optional SupportedBy contact frame. Defaults to bottom; use back to lay an upright book flat." },
+    targetFrameId: { type: "string", enum: ["top"], description: "Optional SupportedBy target frame. Surface Arrangement 0.1 supports top only." }
   }, ["descriptorAssetPath", "template"]),
   tool("inspect_spatial_calibration", "Inspect the active temporary Spatial Calibration session. This is read-only and cannot approve or apply a contract.", {}),
   tool("capture_spatial_calibration", "Run deterministic validation, create the four human-review captures, and write temporary drafts under Library. This cannot approve or apply a contract.", {}),
@@ -55,7 +57,23 @@ const tools = [
   tool("submit_spatial_contract_proposal", "Submit a temporary AI suggestion for relation, frames, or tolerances. A proposal cannot pass, approve, apply, or save a tracked contract.", {
     proposalJson: { type: "string", description: "A JSON proposal describing suggested relation, frames, tolerances, and rationale." }
   }, ["proposalJson"]),
-  tool("get_deterministic_validation_report", "Run and return the deterministic collision, penetration, gap, support, and direction report. The report is not a human approval.", {})
+  tool("get_deterministic_validation_report", "Run and return the deterministic collision, penetration, gap, support, and direction report. The report is not a human approval.", {}),
+  tool("inspect_surface_arrangement", "Read temporary Surface Arrangement proposals and human-review evidence. This is read-only and cannot approve or apply anything.", {}),
+  tool("submit_surface_arrangement_proposal", "Store an AI-authored Surface Arrangement suggestion in Unity SessionState only. This cannot validate, approve, apply, or write tracked files.", {
+    arrangementId: { type: "string" },
+    targetElementId: { type: "string" },
+    targetFrameId: { type: "string", enum: ["top"], default: "top" },
+    preset: { type: "string", enum: ["Neat", "InUse", "Scattered"] },
+    amount: { type: "number", minimum: 0, maximum: 1 },
+    orderliness: { type: "number", minimum: 0, maximum: 1 },
+    grouping: { type: "number", minimum: 0, maximum: 1 },
+    stacking: { type: "number", minimum: 0, maximum: 1 },
+    edgeMargin: { type: "number", minimum: 0.04, default: 0.08 },
+    maxStackHeight: { type: "integer", minimum: 1, maximum: 3, default: 3 },
+    seedOffset: { type: "integer", minimum: 0, default: 0 },
+    membersJson: { type: "string", description: "JSON array of descriptor/count suggestions. Kept behind a JSON boundary until the core schema is available." },
+    rationale: { type: "string" }
+  }, ["arrangementId", "targetElementId", "preset", "amount", "orderliness", "grouping", "stacking"])
 ];
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });

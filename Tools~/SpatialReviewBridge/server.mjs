@@ -205,17 +205,23 @@ async function reviewWorkflowItem(body) {
   if (!item.draftPath || !path.isAbsolute(item.draftPath) || !inside(path.join(projectRoot, "Library"), item.draftPath)) {
     throw new Error("Workflow draft is outside the project Library folder.");
   }
+  const issues = normalizeIssues(body.issues);
+  const comment = cleanText(body.comment, 4000, "comment");
   const result = await reviewDraft({
     draftPath: item.draftPath,
     decision: body.decision,
     reviewer: body.reviewer,
-    issues: body.issues || [],
-    comment: body.comment || "",
+    issues,
+    comment,
   });
   item.status = result.status;
   item.reviewer = String(body.reviewer || "");
   item.reviewedUtc = new Date().toISOString();
-  item.comment = String(body.comment || "");
+  item.comment = comment;
+  if (result.status === "RevisionRequested") {
+    item.revisionIssueCodes = issues;
+    item.revisionComment = comment;
+  }
   state.updatedUtc = new Date().toISOString();
   state.status = deriveWorkflowStatus(state);
   atomicJson(workflowStatePath, state);
@@ -461,6 +467,11 @@ function loadWorkflow() {
   if (!fs.existsSync(workflowStatePath)) throw new Error("Calibration workflow has not been created in Unity.");
   const state = JSON.parse(fs.readFileSync(workflowStatePath, "utf8"));
   if (state.schemaVersion !== 1 || !Array.isArray(state.items)) throw new Error("Unsupported calibration workflow state.");
+  for (const item of state.items) {
+    if (!item.reviewKind) item.reviewKind = "asset";
+    if (!Array.isArray(item.revisionIssueCodes)) item.revisionIssueCodes = [];
+    if (item.status === "RevisionRequested" && !item.revisionComment) item.revisionComment = item.comment || "";
+  }
   return state;
 }
 
@@ -468,6 +479,8 @@ function deriveWorkflowStatus(state) {
   if (state.items.some(item => item.status === "AwaitingHumanReview")) return "AwaitingHumanReview";
   if (state.items.some(item => item.status === "TechnicalFailed")) return "TechnicalFailed";
   if (state.items.some(item => item.status === "NeedsRelationReview")) return "NeedsRelationReview";
+  if (state.items.some(item => item.status === "RevisionRequested")) return "RevisionRequested";
+  if (state.items.some(item => item.status === "UnableToJudge")) return "UnableToJudge";
   if (state.items.length && state.items.every(item => item.status === "Approved")) return "Approved";
   return "Pending";
 }

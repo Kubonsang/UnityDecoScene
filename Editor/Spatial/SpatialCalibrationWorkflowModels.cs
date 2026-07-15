@@ -16,6 +16,22 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public const string Stale = "Stale";
     }
 
+    public static class SpatialCalibrationReviewKinds
+    {
+        public const string Asset = "asset";
+        public const string Arrangement = "arrangement";
+    }
+
+    public static class SpatialArrangementRevisionIssues
+    {
+        public const string TooEmpty = "ARRANGEMENT_TOO_EMPTY";
+        public const string TooComplex = "ARRANGEMENT_TOO_COMPLEX";
+        public const string TooNeat = "ARRANGEMENT_TOO_NEAT";
+        public const string TooMessy = "ARRANGEMENT_TOO_MESSY";
+        public const string UnnaturalStack = "ARRANGEMENT_STACK_UNNATURAL";
+        public const string AwkwardRelationship = "ARRANGEMENT_RELATIONSHIP_AWKWARD";
+    }
+
     [Serializable]
     public sealed class SpatialCalibrationWorkflowState
     {
@@ -47,6 +63,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string template;
         public string relationSource;
         public string suggestedTemplate;
+        public string reviewKind = SpatialCalibrationReviewKinds.Asset;
         public string status = SpatialCalibrationWorkflowStates.Pending;
         public string sessionId;
         public string technicalReportHash;
@@ -56,10 +73,28 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string reviewer;
         public string reviewedUtc;
         public string comment;
+        public string revisionComment;
+        public string[] revisionIssueCodes = Array.Empty<string>();
         public string[] errors = Array.Empty<string>();
         public string[] rawPaths = Array.Empty<string>();
         public string[] evidencePaths = Array.Empty<string>();
         public SpatialCalibrationWorkflowContact[] contacts = Array.Empty<SpatialCalibrationWorkflowContact>();
+        public SpatialArrangementReviewEvidence arrangementEvidence;
+    }
+
+    [Serializable]
+    public sealed class SpatialArrangementReviewEvidence
+    {
+        public string arrangementId;
+        public string targetElementId;
+        public string targetFrameId = "top";
+        public string preset;
+        public int memberCount;
+        public int stackCount;
+        public float minimumSupport;
+        public float minimumEdgeDistance;
+        public string specHash;
+        public string placementHash;
     }
 
     [Serializable]
@@ -85,6 +120,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public int pending;
         public int awaitingReview;
         public int approved;
+        public int revisionRequested;
+        public int unableToJudge;
         public int blocked;
         public List<SpatialCalibrationAgentBlocker> blockers = new();
     }

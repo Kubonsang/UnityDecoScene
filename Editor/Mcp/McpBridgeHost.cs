@@ -155,6 +155,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 "get_spatial_contract_draft" => GetSpatialContractDraft(),
                 "submit_spatial_contract_proposal" => SubmitSpatialContractProposal(Parse<SpatialProposalArgs>(argumentsJson)),
                 "get_deterministic_validation_report" => GetDeterministicValidationReport(),
+                "inspect_surface_arrangement" => InspectSurfaceArrangement(),
+                "submit_surface_arrangement_proposal" => SubmitSurfaceArrangementProposal(Parse<SurfaceArrangementProposal>(argumentsJson)),
                 _ => BridgeResponse.Fail($"Unknown tool '{tool}'.")
             };
         }
@@ -363,6 +365,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 subjectAssetPath = session.Descriptor?.Prefab != null ? AssetDatabase.GetAssetPath(session.Descriptor.Prefab) : string.Empty,
                 targetName = session.TargetPrefab != null ? session.TargetPrefab.name : string.Empty,
                 template = session.Template.ToString(),
+                subjectFrameId = session.Template == SpatialCalibrationTemplate.SupportedBy ? session.SupportedBySubjectFrameId : string.Empty,
+                targetFrameId = session.Template == SpatialCalibrationTemplate.SupportedBy ? session.SupportedByTargetFrameId : string.Empty,
                 collisionProxyCount = session.Geometry?.collisionProxies?.Count ?? 0,
                 contactRuleCount = session.Rules.Count,
                 technicalState = session.LastReport?.status ?? SpatialContractStates.Draft,
@@ -386,7 +390,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (template == SpatialCalibrationTemplate.SupportedBy && target == null)
                 return BridgeResponse.Fail("SupportedBy requires targetPrefabPath.");
 
-            SpatialCalibrationSession.Begin(descriptor, target, template);
+            var session = SpatialCalibrationSession.Begin(descriptor, target, template);
+            if (template == SpatialCalibrationTemplate.SupportedBy
+                && (!string.IsNullOrWhiteSpace(args.subjectFrameId) || !string.IsNullOrWhiteSpace(args.targetFrameId)))
+                session.ConfigureSupportedByFrames(args.subjectFrameId, args.targetFrameId);
             SpatialCalibrationWindow.Open();
             return InspectSpatialCalibration();
         }
@@ -442,6 +449,40 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var session = SpatialCalibrationSession.Current;
             if (session == null) return BridgeResponse.Fail("No Spatial Calibration session is open.");
             return BridgeResponse.Success(SpatialCalibrationValidator.Validate(session));
+        }
+
+        private static BridgeResponse InspectSurfaceArrangement()
+        {
+            var state = SpatialCalibrationWorkflow.LoadState();
+            var reviews = state?.items?
+                .Where(item => string.Equals(item.reviewKind, SpatialCalibrationReviewKinds.Arrangement, StringComparison.Ordinal))
+                .Select(item => new SurfaceArrangementReviewDto
+                {
+                    arrangementId = item.arrangementEvidence?.arrangementId ?? item.id,
+                    status = item.status,
+                    captureHash = item.captureHash,
+                    revisionIssueCodes = item.revisionIssueCodes ?? Array.Empty<string>(),
+                    evidence = item.arrangementEvidence
+                }).ToArray() ?? Array.Empty<SurfaceArrangementReviewDto>();
+            var proposal = SurfaceArrangementProposalStore.Load();
+            return BridgeResponse.Success(new SurfaceArrangementInspectionDto
+            {
+                authority = "proposal-only; AI cannot pass, approve, apply, or write a tracked arrangement",
+                hasProposal = proposal != null,
+                proposal = proposal,
+                reviews = reviews
+            });
+        }
+
+        private static BridgeResponse SubmitSurfaceArrangementProposal(SurfaceArrangementProposal proposal)
+        {
+            var stored = SurfaceArrangementProposalStore.Submit(proposal);
+            return BridgeResponse.Success(new SurfaceArrangementProposalResultDto
+            {
+                storedTemporarily = true,
+                authority = "proposal-only; no validation, approval, apply, or tracked-file write occurred",
+                proposal = stored
+            });
         }
 
         private static ConceptRoom FindRoom(string roomId)
@@ -504,7 +545,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class VisualReviewArgs { public int mood; public int style; public int story; public int composition; public string feedback; }
         [Serializable] private sealed class SpatialProposalArgs { public string proposalJson; }
         [Serializable] private sealed class VerifyRoomReviewArgs { public string runId; public string inputHash; public string technicalReportHash; public string captureSetHash; }
-        [Serializable] private sealed class BeginSpatialCalibrationArgs { public string descriptorAssetPath; public string template; public string targetPrefabPath; }
+        [Serializable] private sealed class BeginSpatialCalibrationArgs { public string descriptorAssetPath; public string template; public string targetPrefabPath; public string subjectFrameId; public string targetFrameId; }
         [Serializable] private sealed class CreatePreviewArgs { public string roomId; public string briefAssetPath; public string catalogAssetPath; public int seed = 12345; public float density = 0.5f; public CompositionElementDto[] elements; }
         [Serializable] private sealed class CompositionElementDto { public string elementId; public string descriptorId; public string role; public string relation; public string anchorElementId; public int count = 1; public string preferredZone; public string preferredSurfaceId; public float spacing = 1f; public bool locked; }
         [Serializable] private sealed class RoomInfoDto { public string roomId; public string objectName; public Vector3 boundsCenter; public Vector3 boundsSize; public int floorColliderCount; public int surfaceCount; public int reviewedSurfaceCount; public int keepClearZoneCount; public ObservationDto[] observationPoints; }
@@ -517,10 +558,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class PreviewResultDto { public string sessionId; public int placementCount; public int assetGapCount; public string manifestHash; public string geometryProfileHash; public string authoringSourceHash; public string obstacleGeometryHash; public int seed; public PlacementDto[] placements; }
         [Serializable] private sealed class PlacementDto { public string placementId; public string elementId; public string assetId; public string role; public Vector3 position; public Vector3 eulerAngles; public Vector3 scale; public bool locked; }
         [Serializable] private sealed class VisualReviewResultDto { public bool passed; public bool advisoryOnly; public VisualQualityScores scores; }
-        [Serializable] private sealed class SpatialCalibrationInfoDto { public string sessionId; public string subjectName; public string subjectAssetPath; public string targetName; public string template; public int collisionProxyCount; public int contactRuleCount; public string technicalState; public int technicalErrorCount; public string captureSetHash; public string[] draftPaths; public bool hasAgentProposal; }
+        [Serializable] private sealed class SpatialCalibrationInfoDto { public string sessionId; public string subjectName; public string subjectAssetPath; public string targetName; public string template; public string subjectFrameId; public string targetFrameId; public int collisionProxyCount; public int contactRuleCount; public string technicalState; public int technicalErrorCount; public string captureSetHash; public string[] draftPaths; public bool hasAgentProposal; }
         [Serializable] private sealed class SpatialCaptureResultDto { public string sessionId; public bool technicalPassed; public int technicalErrorCount; public string reportHash; public string captureSetHash; public string[] rawPaths; public string[] evidencePaths; public string[] draftPaths; }
         [Serializable] private sealed class SpatialDraftDto { public string path; public string json; }
         [Serializable] private sealed class SpatialDraftResultDto { public SpatialDraftDto[] drafts; }
+        [Serializable] private sealed class SurfaceArrangementInspectionDto { public string authority; public bool hasProposal; public SurfaceArrangementProposal proposal; public SurfaceArrangementReviewDto[] reviews; }
+        [Serializable] private sealed class SurfaceArrangementReviewDto { public string arrangementId; public string status; public string captureHash; public string[] revisionIssueCodes; public SpatialArrangementReviewEvidence evidence; }
+        [Serializable] private sealed class SurfaceArrangementProposalResultDto { public bool storedTemporarily; public string authority; public SurfaceArrangementProposal proposal; }
 
         [Serializable]
         private sealed class BridgeResponse

@@ -68,11 +68,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var total = Mathf.Max(1, state.items.Count);
             var approved = state.items.Count(item => item.status == SpatialCalibrationWorkflowStates.Approved);
             var awaiting = state.items.Count(item => item.status == SpatialCalibrationWorkflowStates.AwaitingHumanReview);
+            var revision = state.items.Count(item => item.status == SpatialCalibrationWorkflowStates.RevisionRequested);
+            var unable = state.items.Count(item => item.status == SpatialCalibrationWorkflowStates.UnableToJudge);
             var blocked = state.items.Count(item => item.status is SpatialCalibrationWorkflowStates.TechnicalFailed
                 or SpatialCalibrationWorkflowStates.NeedsRelationReview);
             EditorGUILayout.Space(8f);
             var area = GUILayoutUtility.GetRect(10f, 20f, GUILayout.ExpandWidth(true));
-            EditorGUI.ProgressBar(area, approved / (float)total, $"승인 {approved}/{state.items.Count} · 검수 대기 {awaiting} · 확인 필요 {blocked}");
+            EditorGUI.ProgressBar(area, approved / (float)total,
+                $"승인 {approved}/{state.items.Count} · 검수 대기 {awaiting} · 수정 {revision} · 판단 불가 {unable} · 기술 확인 {blocked}");
             EditorGUILayout.Space(4f);
         }
 
@@ -120,9 +123,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             SpatialCalibrationWorkflowStates.NeedsRelationReview => 0,
             SpatialCalibrationWorkflowStates.TechnicalFailed => 1,
             SpatialCalibrationWorkflowStates.AwaitingHumanReview => 2,
+            SpatialCalibrationWorkflowStates.RevisionRequested => 3,
+            SpatialCalibrationWorkflowStates.UnableToJudge => 4,
             SpatialCalibrationWorkflowStates.Pending => 3,
-            SpatialCalibrationWorkflowStates.Approved => 5,
-            _ => 4
+            SpatialCalibrationWorkflowStates.Approved => 6,
+            _ => 5
         };
 
         private static string StatusLabel(string status) => status switch
@@ -133,6 +138,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             SpatialCalibrationWorkflowStates.NeedsRelationReview => "관계 선택 필요",
             SpatialCalibrationWorkflowStates.Running => "검사 중",
             SpatialCalibrationWorkflowStates.Stale => "재검사 필요",
+            SpatialCalibrationWorkflowStates.RevisionRequested => "수정 필요",
+            SpatialCalibrationWorkflowStates.UnableToJudge => "판단 불가",
             _ => "대기"
         };
 

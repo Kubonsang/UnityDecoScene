@@ -70,6 +70,55 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void MixedHumanDecisionsKeepExplicitStatusAndCounts()
+        {
+            var state = new SpatialCalibrationWorkflowState
+            {
+                workflowId = "mixed",
+                items = new List<SpatialCalibrationWorkflowItem>
+                {
+                    new() { assetId = "approved", status = SpatialCalibrationWorkflowStates.Approved },
+                    new() { assetId = "revise", status = SpatialCalibrationWorkflowStates.RevisionRequested,
+                        revisionIssueCodes = new[] { SpatialArrangementRevisionIssues.TooNeat } },
+                    new() { assetId = "recapture", status = SpatialCalibrationWorkflowStates.UnableToJudge }
+                }
+            };
+
+            var brief = SpatialCalibrationWorkflow.BuildAgentBrief(state);
+
+            Assert.That(SpatialCalibrationWorkflow.SummarizeStatus(state.items),
+                Is.EqualTo(SpatialCalibrationWorkflowStates.RevisionRequested));
+            Assert.That(brief.status, Is.EqualTo(SpatialCalibrationWorkflowStates.RevisionRequested));
+            Assert.That(brief.approved, Is.EqualTo(1));
+            Assert.That(brief.revisionRequested, Is.EqualTo(1));
+            Assert.That(brief.unableToJudge, Is.EqualTo(1));
+            Assert.That(brief.nextAction, Is.EqualTo("REVISE_REQUESTED_ITEMS"));
+        }
+
+        [Test]
+        public void RerunPreservesRevisionHistoryButClearsActiveReviewIdentity()
+        {
+            var item = new SpatialCalibrationWorkflowItem
+            {
+                status = SpatialCalibrationWorkflowStates.RevisionRequested,
+                reviewer = "local-user",
+                reviewedUtc = "2026-07-15T00:00:00Z",
+                comment = "책이 지나치게 가지런합니다.",
+                revisionIssueCodes = new[] { SpatialArrangementRevisionIssues.TooNeat },
+                captureHash = "old-capture"
+            };
+
+            SpatialCalibrationWorkflow.ResetEvidenceForRerun(item);
+
+            Assert.That(item.revisionComment, Is.EqualTo("책이 지나치게 가지런합니다."));
+            Assert.That(item.revisionIssueCodes, Is.EqualTo(new[] { SpatialArrangementRevisionIssues.TooNeat }));
+            Assert.That(item.reviewer, Is.Empty);
+            Assert.That(item.reviewedUtc, Is.Empty);
+            Assert.That(item.comment, Is.Empty);
+            Assert.That(item.captureHash, Is.Empty);
+        }
+
+        [Test]
         public void ReviewTemplateReceivesEmbeddedWorkflowWithoutRuntimePrompting()
         {
             var state = new SpatialCalibrationWorkflowState { workflowId = "abc", createdUtc = "now" };
@@ -77,6 +126,39 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             Assert.That(html, Does.Contain("\"workflowId\":\"abc\""));
             Assert.That(html, Does.Not.Contain("__WORKFLOW_JSON__"));
             Assert.That(html, Does.Not.Contain("__GENERATED_UTC__"));
+        }
+
+        [Test]
+        public void ReviewHtmlRoundTripsKoreanFeedbackAsUtf8WithoutBom()
+        {
+            var state = new SpatialCalibrationWorkflowState
+            {
+                workflowId = "utf8",
+                items = new List<SpatialCalibrationWorkflowItem>
+                {
+                    new()
+                    {
+                        assetId = "book_brown",
+                        displayName = "갈색 책",
+                        status = SpatialCalibrationWorkflowStates.RevisionRequested,
+                        revisionComment = "쌓임이 부자연스러워요.",
+                        revisionIssueCodes = new[] { SpatialArrangementRevisionIssues.UnnaturalStack }
+                    }
+                }
+            };
+            var html = SpatialCalibrationWorkflow.RenderReviewHtml(state,
+                "<meta charset=\"utf-8\"><script>const state=__WORKFLOW_JSON__;</script>__GENERATED_UTC__");
+            var path = System.IO.Path.GetTempFileName();
+            try
+            {
+                System.IO.File.WriteAllText(path, html, new System.Text.UTF8Encoding(false));
+                var bytes = System.IO.File.ReadAllBytes(path);
+                var loaded = System.IO.File.ReadAllText(path, System.Text.Encoding.UTF8);
+                Assert.That(bytes.Take(3), Is.Not.EqualTo(new byte[] { 0xef, 0xbb, 0xbf }));
+                Assert.That(loaded, Does.Contain("갈색 책"));
+                Assert.That(loaded, Does.Contain("쌓임이 부자연스러워요."));
+            }
+            finally { System.IO.File.Delete(path); }
         }
 
         [Test]
@@ -103,6 +185,10 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             Assert.That(template, Does.Contain("awaitingGroups.flatMap(group=>group.items.map"));
             Assert.That(template, Does.Contain("동일 공간 모델"));
             Assert.That(template, Does.Contain("/api/spatial/workflow/review-batch"));
+            Assert.That(template, Does.Contain("ARRANGEMENT_TOO_EMPTY"));
+            Assert.That(template, Does.Contain("쌓임이 부자연스러움"));
+            Assert.That(template, Does.Contain("판단 불가"));
+            Assert.That(template, Does.Contain("이전 수정 요청"));
         }
 
         [TestCase("FloorSupported", SpatialCalibrationTemplate.FloorSupported)]
@@ -177,6 +263,55 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             var selected = SpatialCalibrationWorkflow.SelectBatchCandidates(items, 1);
 
             Assert.That(selected.Select(item => item.id), Is.EqualTo(new[] { "wall" }));
+        }
+
+        [Test]
+        public void ArrangementProposalLivesOnlyInEditorSessionState()
+        {
+            SurfaceArrangementProposalStore.Clear();
+            try
+            {
+                var stored = SurfaceArrangementProposalStore.Submit(new SurfaceArrangementProposal
+                {
+                    arrangementId = "archive-table",
+                    targetElementId = "support-10-reading-table",
+                    preset = "InUse",
+                    membersJson = "[{\"descriptorId\":\"book_brown\",\"minimumCount\":2,\"maximumCount\":3}]",
+                    rationale = "사용 중인 기록 보관소처럼 보이게"
+                });
+
+                var loaded = SurfaceArrangementProposalStore.Load();
+                Assert.That(stored.suggestedUtc, Is.Not.Empty);
+                Assert.That(loaded.arrangementId, Is.EqualTo("archive-table"));
+                Assert.That(loaded.rationale, Is.EqualTo("사용 중인 기록 보관소처럼 보이게"));
+                Assert.That(loaded.targetFrameId, Is.EqualTo("top"));
+            }
+            finally { SurfaceArrangementProposalStore.Clear(); }
+        }
+
+        [Test]
+        public void ArrangementProposalRejectsUnsupportedOrUnsafeValues()
+        {
+            Assert.Throws<ArgumentException>(() => SurfaceArrangementProposalStore.Submit(new SurfaceArrangementProposal
+            {
+                arrangementId = "bad",
+                targetElementId = "table",
+                preset = "LearnedTheme",
+                amount = 0.5f,
+                orderliness = 0.5f,
+                grouping = 0.5f,
+                stacking = 0.5f
+            }));
+            Assert.Throws<ArgumentOutOfRangeException>(() => SurfaceArrangementProposalStore.Submit(new SurfaceArrangementProposal
+            {
+                arrangementId = "bad",
+                targetElementId = "table",
+                preset = "InUse",
+                amount = 1.2f,
+                orderliness = 0.5f,
+                grouping = 0.5f,
+                stacking = 0.5f
+            }));
         }
     }
 }

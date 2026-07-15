@@ -34,23 +34,26 @@
     .header-state b { color: var(--text); }
     main { max-width: 1560px; margin: auto; padding: 14px; }
     .overview { margin-bottom: 12px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-    .overview-head { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--panel-3); border-bottom: 1px solid var(--line); }
+    .overview-head { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--panel-3); border-bottom: 1px solid var(--line); }
     .overview-title { padding: 12px 16px; font-weight: 750; text-align: center; border-right: 1px solid var(--line); }
     .overview-title:last-child { border-right: 0; }
     .overview-title.approval { color: var(--green); }
     .overview-title.revision { color: var(--red); }
+    .overview-title.unable { color: var(--amber); }
     .overview-title.undecided { color: #c0c9d3; }
-    .overview-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); min-height: 203px; max-height: 203px; overflow: hidden; }
+    .overview-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-height: 203px; max-height: 203px; overflow: hidden; }
     .overview-list { margin: 0; padding: 0; list-style: none; border-right: 1px solid var(--line); overflow: auto; }
     .overview-list:last-child { border-right: 0; }
     .overview-row { width: 100%; display: flex; align-items: center; gap: 9px; min-height: 28px; padding: 4px 14px; color: #d4dde7; background: transparent; border: 0; border-bottom: 1px dashed var(--line-soft); text-align: left; cursor: pointer; }
     .overview-row:hover, .overview-row.selected { background: #202b37; }
     .overview-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .overview-row.revision { color: var(--red); }
+    .overview-row.unable { color: var(--amber); }
     .overview-empty { display: grid; min-height: 90px; place-items: center; color: #697686; }
     .dot { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: var(--gray); }
     .dot.approval { background: var(--green); }
     .dot.revision { background: var(--red); }
+    .dot.unable { background: var(--amber); }
     .workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 12px; align-items: stretch; }
     .inbox, .detail, .action-bar { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
     .inbox { min-height: 510px; padding: 14px 12px; }
@@ -69,6 +72,7 @@
     .state-banner { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-3); font-weight: 750; }
     .state-banner.approval { color: var(--green); border-color: #2f8444; background: #123221; }
     .state-banner.revision { color: #ff8585; border-color: #8a343a; background: #32191b; }
+    .state-banner.unable { color: #ffd27d; border-color: #7e6334; background: #302719; }
     .state-banner.undecided { color: #c7d0da; }
     .case-head { display: flex; align-items: flex-start; gap: 12px; margin: 0 2px 14px; }
     .case-head h2 { margin: 0 0 3px; font-size: 23px; line-height: 1.2; }
@@ -81,6 +85,8 @@
     .family { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 0 0 12px; padding: 8px 10px; color: var(--muted); background: var(--panel-3); border: 1px solid var(--line-soft); border-radius: 7px; }
     .family strong { color: #d7e8fb; }
     .variant { padding: 2px 7px; border: 1px solid #3a4859; border-radius: 999px; }
+    .revision-history { margin: 0 0 12px; padding: 9px 11px; color: #ffd0d0; background: #2c1c1e; border: 1px solid #71363b; border-radius: 7px; }
+    .revision-history strong { display: block; margin-bottom: 4px; }
     .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
     .view { min-width: 0; margin: 0; }
     .view figcaption { margin-bottom: 7px; color: #bcc6d1; text-align: center; }
@@ -89,6 +95,8 @@
     .metric { padding: 9px 8px; overflow: hidden; color: var(--muted); background: var(--panel-3); border: 1px solid var(--line-soft); border-radius: 7px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
     .metric b { color: var(--text); }
     .notice { margin: 10px 2px 0; color: var(--muted); }
+    .arrangement-evidence { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 8px; margin: 0 0 12px; padding: 10px; background: #111b25; border: 1px solid #31506c; border-radius: 8px; }
+    .arrangement-evidence .metric { white-space: normal; }
     .action-bar { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(170px, .7fr) minmax(170px, .7fr) minmax(150px, .6fr); gap: 12px; align-items: stretch; margin-top: 12px; padding: 14px; }
     .review-check { display: flex; align-items: center; gap: 12px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-3); cursor: pointer; }
     .review-check input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--blue); }
@@ -98,6 +106,11 @@
     .review-note strong { display: block; color: var(--text); }
     .review-note textarea { width: 100%; min-height: 58px; resize: vertical; padding: 10px 12px; color: var(--text); background: var(--panel-3); border: 1px solid var(--line); border-radius: 7px; outline: none; }
     .review-note textarea:focus { border-color: var(--blue); }
+    .issue-picker { grid-column: 1 / -1; padding: 11px 12px; background: var(--panel-3); border: 1px solid var(--line); border-radius: 8px; }
+    .issue-picker strong { display: block; margin-bottom: 8px; }
+    .issue-options { display: flex; flex-wrap: wrap; gap: 7px; }
+    .issue-option { display: flex; align-items: center; gap: 6px; padding: 6px 9px; color: #d8e0e8; background: #1a2530; border: 1px solid #3a4859; border-radius: 999px; cursor: pointer; }
+    .issue-option input { accent-color: var(--red); }
     .action-error { color: var(--red) !important; }
     .decision { border: 1px solid var(--line); border-radius: 8px; background: #1c2530; font-size: 16px; font-weight: 800; cursor: pointer; }
     .decision.approval { color: #effff2; border-color: #36854a; background: #235f33; }
@@ -141,15 +154,25 @@ const views=[['front','정면'],['side','측면'],['top','상단'],['contact','�
 const reviewed=new Set();
 const decisions=new Map();
 const comments=new Map();
+const issueSelections=new Map();
 let selectedGroupId='';
 let evidenceMode=false;
 let nonce='';
 let actionMessage='';
 
 const reviewableStatus=new Set(['AwaitingHumanReview','TechnicalFailed','UnableToJudge','RevisionRequested']);
+const arrangementIssueLabels=[
+  ['ARRANGEMENT_TOO_EMPTY','너무 비어 있음'],
+  ['ARRANGEMENT_TOO_COMPLEX','너무 복잡함'],
+  ['ARRANGEMENT_TOO_NEAT','지나치게 가지런함'],
+  ['ARRANGEMENT_TOO_MESSY','지나치게 어지러움'],
+  ['ARRANGEMENT_STACK_UNNATURAL','쌓임이 부자연스러움'],
+  ['ARRANGEMENT_RELATIONSHIP_AWKWARD','물건 관계가 어색함']
+];
 const toFileUrl=p=>'file:///'+encodeURI(String(p||'').replaceAll('\\','/'));
 const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const familyKey=item=>[item.geometryFamilyHash||`single:${item.id}`,item.template||'',item.status].join('|');
+const reviewKind=item=>item.reviewKind||'asset';
+const familyKey=item=>[reviewKind(item),item.arrangementEvidence?.arrangementId||'',item.geometryFamilyHash||`single:${item.id}`,item.template||'',item.status].join('|');
 const imageUrl=(item,index,evidence)=>location.protocol==='file:'?toFileUrl((evidence?item.evidencePaths:item.rawPaths)[index]):`/api/spatial/workflow/image/${encodeURIComponent(item.id)}/${views[index][0]}?evidence=${evidence?1:0}&hash=${item.captureHash}`;
 
 function reviewGroups(){
@@ -161,17 +184,20 @@ function reviewGroups(){
 }
 function familyMembers(group){
   const item=group.representative;
+  if(reviewKind(item)==='arrangement')return group.items;
   if(!item.geometryFamilyHash)return group.items;
   return workflow.items.filter(value=>value.geometryFamilyHash===item.geometryFamilyHash&&value.template===item.template);
 }
 function bucket(group){
   if(decisions.get(group.id)==='Approved')return 'approval';
   if(group.items.some(item=>['RevisionRequested','TechnicalFailed'].includes(item.status)))return 'revision';
+  if(group.items.some(item=>item.status==='UnableToJudge'))return 'unable';
   return 'undecided';
 }
 function grouped(groups){return {
   approval:groups.filter(group=>bucket(group)==='approval'),
   revision:groups.filter(group=>bucket(group)==='revision'),
+  unable:groups.filter(group=>bucket(group)==='unable'),
   undecided:groups.filter(group=>bucket(group)==='undecided')
 }}
 function groupName(group){return group.representative.displayName||group.representative.id;}
@@ -183,12 +209,41 @@ function statusLabel(group){
   const value=bucket(group);
   if(value==='approval')return '승인 예정';
   if(value==='revision')return '수정 필요';
-  if(group.representative.status==='UnableToJudge')return '판단 불가';
+  if(value==='unable')return '판단 불가';
   return '미판정';
+}
+function hydrateReviewHistory(value){
+  for(const item of value.items||[]){
+    const id=encodeURIComponent(familyKey(item));
+    const comment=item.comment||'';
+    if(comment&&!comments.has(id))comments.set(id,comment);
+  }
+}
+function revisionHistory(item){
+  const codes=Array.isArray(item.revisionIssueCodes)?item.revisionIssueCodes:[];
+  const labels=codes.map(code=>arrangementIssueLabels.find(value=>value[0]===code)?.[1]||code);
+  if(!item.revisionComment&&!labels.length)return '';
+  return `<div class="revision-history"><strong>이전 수정 요청</strong>${labels.length?`${labels.map(escapeHtml).join(' · ')}<br>`:''}${escapeHtml(item.revisionComment||'')}</div>`;
 }
 function listRows(groups,kind,compact=false){
   if(!groups.length)return `<div class="${compact?'inbox-empty':'overview-empty'}">항목이 없습니다.</div>`;
   return groups.map(group=>`<button class="${compact?'inbox-row':'overview-row'} ${kind} ${selectedGroupId===group.id?'selected':''}" data-select="${group.id}"><span class="dot ${kind}"></span><span class="name">${escapeHtml(groupName(group))}</span></button>`).join('');
+}
+function arrangementEvidence(item){
+  const value=item.arrangementEvidence;
+  if(reviewKind(item)!=='arrangement'||!value)return '';
+  const fields=[
+    ['프리셋',value.preset||'-'],['소품 수',Number(value.memberCount||0)],['스택',Number(value.stackCount||0)],
+    ['최소 지지율',`${Math.round(Number(value.minimumSupport||0)*100)}%`],
+    ['최소 가장자리',`${(Number(value.minimumEdgeDistance||0)*100).toFixed(1)}cm`],
+    ['받침',`${value.targetElementId||'-'} · ${value.targetFrameId||'top'}`]
+  ];
+  return `<div class="arrangement-evidence">${fields.map(([label,value])=>`<span class="metric">${escapeHtml(label)} <b>${escapeHtml(value)}</b></span>`).join('')}</div>`;
+}
+function issuePicker(group){
+  if(reviewKind(group.representative)!=='arrangement')return '';
+  const selected=issueSelections.get(group.id)||new Set();
+  return `<div class="issue-picker"><strong>수정할 연출 문제</strong><div class="issue-options">${arrangementIssueLabels.map(([code,label])=>`<label class="issue-option"><input type="checkbox" data-issue="${code}" ${selected.has(code)?'checked':''}>${label}</label>`).join('')}</div></div>`;
 }
 function detail(group){
   if(!group)return `<section class="detail empty">현재 사용자 검수 대기 항목이 없습니다.</section>`;
@@ -200,11 +255,14 @@ function detail(group){
   const canonical=workflow.items.find(value=>value.id===item.geometryFamilyCanonicalId);
   const family=members.length>1?`<div class="family"><strong>동일 공간 모델 ${members.length}개</strong>${members.map(value=>`<span class="variant">${escapeHtml(value.displayName)}</span>`).join('')}${canonical&&canonical.status==='Approved'?`<span>승인된 기준: ${escapeHtml(canonical.displayName)}</span>`:''}<span>재질·텍스처는 카탈로그에서 각각 유지됩니다.</span></div>`:'';
   const source=evidenceMode?'evidence':'raw';
+  const displayViews=reviewKind(item)==='arrangement'?[['front','사선 전경'],['side','측면'],['top','상단'],['contact','접촉 확대']]:views;
   return `<section class="detail" data-group="${group.id}">
     <div class="state-banner ${state}"><span class="dot ${state}"></span>검수 중: ${statusLabel(group)}</div>
     <div class="case-head"><div><h2>${escapeHtml(groupName(group))}</h2><small>${escapeHtml(item.template||'관계 미확정')} · ${escapeHtml(item.assetId)}</small></div><span class="status">${escapeHtml(item.status)}</span><div class="mode"><button class="${source==='raw'?'active':''}" data-mode="raw">원본</button><button class="${source==='evidence'?'active':''}" data-mode="evidence">검사선</button></div></div>
     ${family}
-    <div class="grid">${views.map(([id,label],index)=>`<figure class="view"><figcaption>${label}</figcaption><img src="${imageUrl(item,index,evidenceMode)}" alt="${label}"></figure>`).join('')}</div>
+    ${revisionHistory(item)}
+    ${arrangementEvidence(item)}
+    <div class="grid">${displayViews.map(([id,label],index)=>`<figure class="view"><figcaption>${label}</figcaption><img src="${imageUrl(item,index,evidenceMode)}" alt="${label}"></figure>`).join('')}</div>
     <div class="measurements">${metrics(item)}</div>
     <p class="notice">${item.status==='TechnicalFailed'?(item.errors||[]).map(escapeHtml).join(' · '):`대기 계약 ${group.items.length}개 · 형상 ${escapeHtml(String(item.geometryFamilyHash||'개별').slice(0,15))} · 캡처 ${escapeHtml(String(item.captureHash||'').slice(0,8))}`}</p>
   </section>`;
@@ -218,7 +276,8 @@ function actionBar(group,groups){
   const undecidedAwaiting=awaitingGroups.filter(value=>decisions.get(value.id)!=='Approved');
   const canFinalize=awaitingGroups.length>0&&undecidedAwaiting.length===0&&nonce;
   return `<section class="action-bar">
-    <label class="review-note"><span><strong>검수 메모</strong>수정 필요 선택 시 필수</span><textarea data-comment="${group.id}" placeholder="예: 측면에서 벽과 횃불 사이가 떠 보임">${escapeHtml(comments.get(group.id)||'')}</textarea></label>
+    ${issuePicker(group)}
+    <label class="review-note"><span><strong>검수 메모</strong>${reviewKind(group.representative)==='arrangement'?'문제 선택을 보충할 때 작성':'수정 필요 선택 시 필수'}</span><textarea data-comment="${group.id}" placeholder="예: 측면에서 벽과 횃불 사이가 떠 보임">${escapeHtml(comments.get(group.id)||'')}</textarea></label>
     <label class="review-check"><input type="checkbox" data-reviewed="${group.id}" ${isReviewed?'checked':''} ${awaiting?'':'disabled'}><span><strong>4뷰 확인 완료</strong><span>체크만으로 승인되지 않습니다</span></span></label>
     <button class="decision approval" data-plan="Approved" ${awaiting&&isReviewed?'':'disabled'}>${decisions.get(group.id)==='Approved'?'승인 예정 취소':'승인 예정'}</button>
     <button class="decision revision" data-decision="RevisionRequested" ${awaiting&&isReviewed?'':'disabled'}>수정 필요</button>
@@ -234,15 +293,16 @@ function render(){
   const approvedCount=workflow.items.filter(item=>item.status==='Approved').length;
   document.querySelector('#app').innerHTML=`
     <section class="overview" aria-label="전체 판정 현황">
-      <div class="overview-head"><div class="overview-title approval">승인 예정 ${sets.approval.length}</div><div class="overview-title revision">수정 필요 ${sets.revision.length}</div><div class="overview-title undecided">미판정 ${sets.undecided.length}</div></div>
-      <div class="overview-columns"><div class="overview-list">${listRows(sets.approval,'approval')}</div><div class="overview-list">${listRows(sets.revision,'revision')}</div><div class="overview-list">${listRows(sets.undecided,'undecided')}</div></div>
+      <div class="overview-head"><div class="overview-title approval">승인 예정 ${sets.approval.length}</div><div class="overview-title revision">수정 필요 ${sets.revision.length}</div><div class="overview-title unable">판단 불가 ${sets.unable.length}</div><div class="overview-title undecided">미판정 ${sets.undecided.length}</div></div>
+      <div class="overview-columns"><div class="overview-list">${listRows(sets.approval,'approval')}</div><div class="overview-list">${listRows(sets.revision,'revision')}</div><div class="overview-list">${listRows(sets.unable,'unable')}</div><div class="overview-list">${listRows(sets.undecided,'undecided')}</div></div>
     </section>
-    <div class="workspace"><aside class="inbox"><h2>검수 목록</h2>${[['approval','승인 예정'],['revision','수정 필요'],['undecided','미판정']].map(([kind,label])=>`<section class="group"><div class="group-head"><span class="dot ${kind}"></span>${label}<span class="count">${sets[kind].length}</span></div><div class="inbox-list">${listRows(sets[kind],kind,true)}</div></section>`).join('')}</aside>${detail(selected)}</div>
+    <div class="workspace"><aside class="inbox"><h2>검수 목록</h2>${[['approval','승인 예정'],['revision','수정 필요'],['unable','판단 불가'],['undecided','미판정']].map(([kind,label])=>`<section class="group"><div class="group-head"><span class="dot ${kind}"></span>${label}<span class="count">${sets[kind].length}</span></div><div class="inbox-list">${listRows(sets[kind],kind,true)}</div></section>`).join('')}</aside>${detail(selected)}</div>
     ${actionBar(selected,groups)}`;
   document.querySelector('#header-state').innerHTML=`저장된 승인 <b>${approvedCount}</b> · 현재 검수 <b>${groups.length}</b>`;
   document.querySelectorAll('[data-select]').forEach(button=>button.onclick=()=>{selectedGroupId=button.dataset.select;evidenceMode=false;actionMessage='';render()});
   document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>{evidenceMode=button.dataset.mode==='evidence';render()});
   document.querySelectorAll('[data-comment]').forEach(input=>input.oninput=()=>{comments.set(input.dataset.comment,input.value);actionMessage=''});
+  document.querySelectorAll('[data-issue]').forEach(input=>input.onchange=()=>{const selected=issueSelections.get(selectedGroupId)||new Set();input.checked?selected.add(input.dataset.issue):selected.delete(input.dataset.issue);issueSelections.set(selectedGroupId,selected);actionMessage='';});
   document.querySelectorAll('[data-reviewed]').forEach(input=>input.onchange=()=>{input.checked?reviewed.add(input.dataset.reviewed):reviewed.delete(input.dataset.reviewed);if(!input.checked)decisions.delete(input.dataset.reviewed);render()});
   document.querySelectorAll('[data-plan]').forEach(button=>button.onclick=()=>{decisions.get(selectedGroupId)==='Approved'?decisions.delete(selectedGroupId):decisions.set(selectedGroupId,'Approved');render()});
   document.querySelectorAll('[data-decision]').forEach(button=>button.onclick=()=>decide(selectedGroupId,button.dataset.decision));
@@ -256,7 +316,7 @@ async function connect(){
       if(health.ok){
         const value=await health.json();nonce=value.nonce||'';
         const latest=await fetch('http://127.0.0.1:4174/api/spatial/workflow');
-        if(latest.ok)workflow=await latest.json();
+        if(latest.ok){workflow=await latest.json();hydrateReviewHistory(workflow);}
         render();return;
       }
     }catch{}
@@ -269,12 +329,13 @@ async function decide(groupId,decision){
   const group=reviewGroups().find(value=>value.id===groupId);
   if(!group||!nonce)return;
   const comment=String(comments.get(groupId)||'').trim();
-  if(decision==='RevisionRequested'&&!comment){actionMessage='수정 필요 사유를 먼저 적어주세요.';render();return;}
+  const issues=[...(issueSelections.get(groupId)||new Set())];
+  if(decision==='RevisionRequested'&&!issues.length&&!comment){actionMessage='수정할 문제를 선택하거나 이유를 적어주세요.';render();return;}
   const buttons=document.querySelectorAll('.action-bar button,.action-bar input');buttons.forEach(control=>control.disabled=true);
   try{
     for(const item of group.items){
-      const response=await fetch('http://127.0.0.1:4174/api/spatial/workflow/review',{method:'POST',headers:{'Content-Type':'application/json','X-Spatial-Review-Nonce':nonce},body:JSON.stringify({id:item.id,decision,captureHash:item.captureHash,reviewer:localStorage.getItem('spatial-reviewer')||'local-user',issues:[],comment:comment||'동일 형상군 사용자 판정'})});
-      const result=await response.json();if(!response.ok)throw new Error(result.error||'판정 저장 실패');item.status=result.status;
+      const response=await fetch('http://127.0.0.1:4174/api/spatial/workflow/review',{method:'POST',headers:{'Content-Type':'application/json','X-Spatial-Review-Nonce':nonce},body:JSON.stringify({id:item.id,decision,captureHash:item.captureHash,reviewer:localStorage.getItem('spatial-reviewer')||'local-user',issues,comment:comment||'동일 형상군 사용자 판정'})});
+      const result=await response.json();if(!response.ok)throw new Error(result.error||'판정 저장 실패');item.status=result.status;item.comment=comment;item.revisionIssueCodes=issues;
     }
     decisions.delete(groupId);reviewed.delete(groupId);comments.delete(groupId);actionMessage='';render();
   }catch(error){alert(error.message);render();}
@@ -292,7 +353,7 @@ async function bulkApprove(){
     awaitingGroups.forEach(group=>{decisions.delete(group.id);reviewed.delete(group.id)});render();
   }catch(error){alert(error.message);render();}
 }
-render();connect();
+hydrateReviewHistory(workflow);render();connect();
 </script>
 </body>
 </html>

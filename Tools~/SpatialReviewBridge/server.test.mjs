@@ -52,7 +52,30 @@ test("room review serves sanitized evidence and atomically records a current app
   assert.equal(stored.decision.inputHash, "input-1");
   assert.equal(stored.decision.technicalReportHash, "validation-1");
   assert.equal(stored.decision.captureSetHash, "capture-1");
+  assert.equal(stored.decision.comment, "네 시점을 직접 확인함");
   assert.equal(fs.existsSync(fixture.reviewPath), true);
+});
+
+test("room review preserves structured Korean revision feedback as UTF-8", async t => {
+  const fixture = await startFixture();
+  t.after(() => fixture.close());
+  const health = await (await fetch(`${fixture.baseUrl}/api/health`)).json();
+  const response = await fetch(`${fixture.baseUrl}/api/room-review/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Spatial-Review-Nonce": health.nonce },
+    body: JSON.stringify({
+      runId: "run-1", inputHash: "input-1", validationHash: "validation-1", captureHash: "capture-1",
+      decision: "RevisionRequested",
+      issues: ["ARRANGEMENT_STACK_UNNATURAL", "물건 관계가 어색함"],
+      comment: "책 더미가 너무 가지런하고 촛불과 붙어 있어요.",
+    }),
+  });
+  assert.equal(response.status, 200);
+  const storedText = fs.readFileSync(fixture.statePath, "utf8");
+  const stored = JSON.parse(storedText);
+  assert.equal(stored.decision.comment, "책 더미가 너무 가지런하고 촛불과 붙어 있어요.");
+  assert.deepEqual(stored.decision.issueCodes, ["ARRANGEMENT_STACK_UNNATURAL", "물건 관계가 어색함"]);
+  assert.match(storedText, /책 더미가 너무 가지런하고 촛불과 붙어 있어요/);
 });
 
 test("room review rejects stale hashes and unexplained revision requests", async t => {

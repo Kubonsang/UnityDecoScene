@@ -96,10 +96,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 if (!previous.TryGetValue(guid, out var item)) item = NewItem(guid, descriptorPath, descriptor, dependencyHash);
                 else if (!string.Equals(item.dependencyHash, dependencyHash, StringComparison.Ordinal))
                 {
-                    item.status = SpatialCalibrationWorkflowStates.Stale;
+                    ResetEvidenceForRerun(item);
                     item.dependencyHash = dependencyHash;
-                    ClearEvidence(item);
+                    item.status = SpatialCalibrationWorkflowStates.Stale;
                 }
+                if (string.IsNullOrWhiteSpace(item.reviewKind)) item.reviewKind = SpatialCalibrationReviewKinds.Asset;
+                item.revisionIssueCodes ??= Array.Empty<string>();
+                if (item.status == SpatialCalibrationWorkflowStates.RevisionRequested
+                    && string.IsNullOrWhiteSpace(item.revisionComment)) item.revisionComment = item.comment;
                 item.displayName = descriptor.Prefab.name;
                 item.assetId = descriptor.AssetId;
                 item.descriptorPath = descriptorPath;
@@ -128,8 +132,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             item.template = template.ToString();
             item.suggestedTemplate = string.Empty;
             item.relationSource = "HumanOverride";
+            ResetEvidenceForRerun(item);
             item.status = SpatialCalibrationWorkflowStates.Pending;
-            ClearEvidence(item);
             SaveAndGenerate(state);
         }
 
@@ -173,6 +177,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
                 foreach (var item in candidates)
                 {
+                    ResetEvidenceForRerun(item);
                     item.status = SpatialCalibrationWorkflowStates.Running;
                     SaveState(state);
                     RunItem(item, wall);
@@ -200,29 +205,39 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public static SpatialCalibrationAgentBrief BuildAgentBrief(SpatialCalibrationWorkflowState state)
         {
+            if (state == null) throw new ArgumentNullException(nameof(state));
             var brief = new SpatialCalibrationAgentBrief
             {
                 workflowId = state.workflowId,
-                status = state.status,
+                status = SummarizeStatus(state.items),
                 reviewUrl = "http://127.0.0.1:4174/workflow",
                 total = state.items.Count,
                 pending = state.items.Count(item => item.status is SpatialCalibrationWorkflowStates.Pending or SpatialCalibrationWorkflowStates.Stale),
                 awaitingReview = state.items.Count(item => item.status == SpatialCalibrationWorkflowStates.AwaitingHumanReview),
                 approved = state.items.Count(item => item.status == SpatialCalibrationWorkflowStates.Approved),
+                revisionRequested = state.items.Count(item => item.status == SpatialCalibrationWorkflowStates.RevisionRequested),
+                unableToJudge = state.items.Count(item => item.status == SpatialCalibrationWorkflowStates.UnableToJudge),
                 blocked = state.items.Count(item => item.status is SpatialCalibrationWorkflowStates.TechnicalFailed or SpatialCalibrationWorkflowStates.NeedsRelationReview)
             };
             brief.nextAction = brief.awaitingReview > 0 ? "WAIT_FOR_HUMAN_REVIEW"
                 : brief.blocked > 0 ? "FIX_ONLY_BLOCKERS"
+                : brief.revisionRequested > 0 ? "REVISE_REQUESTED_ITEMS"
+                : brief.unableToJudge > 0 ? "RECAPTURE_UNABLE_TO_JUDGE"
                 : brief.pending > 0 ? "RUN_NEXT_BATCH"
                 : "CALIBRATION_COMPLETE";
             brief.blockers = state.items
-                .Where(item => item.status is SpatialCalibrationWorkflowStates.TechnicalFailed or SpatialCalibrationWorkflowStates.NeedsRelationReview)
+                .Where(item => item.status is SpatialCalibrationWorkflowStates.TechnicalFailed
+                    or SpatialCalibrationWorkflowStates.NeedsRelationReview
+                    or SpatialCalibrationWorkflowStates.RevisionRequested
+                    or SpatialCalibrationWorkflowStates.UnableToJudge)
                 .Select(item => new SpatialCalibrationAgentBlocker
                 {
                     assetId = item.assetId,
                     status = item.status,
                     suggestedTemplate = item.suggestedTemplate,
-                    errorCodes = (item.errors ?? Array.Empty<string>())
+                    errorCodes = (item.status == SpatialCalibrationWorkflowStates.RevisionRequested
+                            ? item.revisionIssueCodes ?? Array.Empty<string>()
+                            : item.errors ?? Array.Empty<string>())
                         .Select(ErrorCode).Distinct(StringComparer.Ordinal).ToArray()
                 }).ToList();
             return brief;
@@ -436,17 +451,28 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             AtomicWrite(AgentBriefPath, JsonUtility.ToJson(BuildAgentBrief(state), true) + Environment.NewLine);
         }
 
-        private static string DeriveWorkflowStatus(SpatialCalibrationWorkflowState state)
+        public static string SummarizeStatus(IEnumerable<SpatialCalibrationWorkflowItem> items)
         {
-            if (state.items.Any(item => item.status == SpatialCalibrationWorkflowStates.AwaitingHumanReview)) return SpatialCalibrationWorkflowStates.AwaitingHumanReview;
-            if (state.items.Any(item => item.status == SpatialCalibrationWorkflowStates.TechnicalFailed)) return SpatialCalibrationWorkflowStates.TechnicalFailed;
-            if (state.items.Any(item => item.status == SpatialCalibrationWorkflowStates.NeedsRelationReview)) return SpatialCalibrationWorkflowStates.NeedsRelationReview;
-            if (state.items.Count > 0 && state.items.All(item => item.status == SpatialCalibrationWorkflowStates.Approved)) return SpatialCalibrationWorkflowStates.Approved;
+            var values = items?.Where(item => item != null).ToArray() ?? Array.Empty<SpatialCalibrationWorkflowItem>();
+            if (values.Any(item => item.status == SpatialCalibrationWorkflowStates.AwaitingHumanReview)) return SpatialCalibrationWorkflowStates.AwaitingHumanReview;
+            if (values.Any(item => item.status == SpatialCalibrationWorkflowStates.TechnicalFailed)) return SpatialCalibrationWorkflowStates.TechnicalFailed;
+            if (values.Any(item => item.status == SpatialCalibrationWorkflowStates.NeedsRelationReview)) return SpatialCalibrationWorkflowStates.NeedsRelationReview;
+            if (values.Any(item => item.status == SpatialCalibrationWorkflowStates.RevisionRequested)) return SpatialCalibrationWorkflowStates.RevisionRequested;
+            if (values.Any(item => item.status == SpatialCalibrationWorkflowStates.UnableToJudge)) return SpatialCalibrationWorkflowStates.UnableToJudge;
+            if (values.Length > 0 && values.All(item => item.status == SpatialCalibrationWorkflowStates.Approved)) return SpatialCalibrationWorkflowStates.Approved;
             return SpatialCalibrationWorkflowStates.Pending;
         }
 
-        private static void ClearEvidence(SpatialCalibrationWorkflowItem item)
+        private static string DeriveWorkflowStatus(SpatialCalibrationWorkflowState state) => SummarizeStatus(state.items);
+
+        public static void ResetEvidenceForRerun(SpatialCalibrationWorkflowItem item)
         {
+            if (item == null) throw new ArgumentNullException(nameof(item));
+            if (item.status == SpatialCalibrationWorkflowStates.RevisionRequested)
+            {
+                if (!string.IsNullOrWhiteSpace(item.comment)) item.revisionComment = item.comment;
+                item.revisionIssueCodes ??= Array.Empty<string>();
+            }
             item.sessionId = string.Empty;
             item.technicalReportHash = string.Empty;
             item.captureHash = string.Empty;
