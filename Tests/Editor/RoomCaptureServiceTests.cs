@@ -13,13 +13,27 @@ namespace UnityDecoScene.DungeonDecorator.Tests
 {
     public sealed class RoomCaptureServiceTests
     {
+        private const string OnePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
         private readonly List<Object> cleanup = new();
         private readonly List<string> directories = new();
         private readonly List<Scene> previewScenes = new();
 
+        [SetUp]
+        public void SetUp()
+        {
+            RoomCaptureService.RenderOverrideForTests = (directory, name) =>
+            {
+                Directory.CreateDirectory(directory);
+                var path = Path.Combine(directory, name + ".png");
+                File.WriteAllBytes(path, Convert.FromBase64String(OnePixelPng));
+                return path;
+            };
+        }
+
         [TearDown]
         public void TearDown()
         {
+            RoomCaptureService.RenderOverrideForTests = null;
             foreach (var item in cleanup.Where(item => item != null)) Object.DestroyImmediate(item);
             foreach (var scene in previewScenes.Where(scene => scene.IsValid() && scene.isLoaded)) EditorSceneManager.ClosePreviewScene(scene);
             foreach (var directory in directories.Where(Directory.Exists)) Directory.Delete(directory, true);
@@ -188,6 +202,10 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         [Test]
         public void CaptureExcludesObjectsFromOtherLoadedScenes()
         {
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+                Assert.Ignore("Real capture isolation requires a graphics device; TestPlay runs Unity with -nographics.");
+            RoomCaptureService.RenderOverrideForTests = null;
+
             var session = CreateSession(addPrimaryObservation: true);
             var wall = AddWallSurface(session);
             AddWallPlacement(session, wall, "hero-bookcase:0", "bookcase-double", DecorAssetType.Prop, ContactRequirement.WallBacked, new Vector3(0f, 1.4f, 3.65f), new Vector3(1.8f, 2.8f, 0.45f));

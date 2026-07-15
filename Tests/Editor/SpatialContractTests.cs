@@ -105,7 +105,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
         [Test]
         public void Float32BoundaryAndLiteralAmpersandHashesMatchUnityCtxVector()
         {
-            var document = KnownApprovedContract();
+            var document = UnityCtxBoundaryContract();
             document.asset.asset_path = "Assets/Props/A&B.prefab";
             document.asset.pivot_offset[0] = 0.5500005f;
             document.asset.geometry_hash = SpatialContractHashUtility.ComputeGeometryHash(document.asset);
@@ -120,15 +120,15 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
         [Test]
         public void Utf16OrderingAndLineSeparatorHashMatchesUnityCtxVector()
         {
-            var document = KnownApprovedContract();
+            var document = UnityCtxBoundaryContract();
             document.asset.dependency_hash = "quoted:\"\u2028:literal:\\u2028:\u2029";
             var bmp = document.asset.collision_proxies[0];
             bmp.id = "\ue000";
             var supplementary = new SpatialObbContract
             {
                 id = "\U00010000",
-                center = new[] { 0.25f, 0.5f, 0f },
-                size = new[] { 1f, 1f, 1f },
+                center = new[] { 0.25f, 1f, 0f },
+                size = new[] { 1f, 2f, 0.05f },
                 rotation = new[] { 0f, 0f, 0f, 1f }
             };
             document.asset.collision_proxies = new List<SpatialObbContract> { bmp, supplementary };
@@ -562,6 +562,70 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
                     capture_set_hash = "capture",
                     reviewer = "local-user",
                     revision = 1
+                }
+            };
+        }
+
+        private static SpatialContractDocument UnityCtxBoundaryContract()
+        {
+            return new SpatialContractDocument
+            {
+                contract_version = 1,
+                contract_type = "asset",
+                state = SpatialContractStates.AwaitingHumanReview,
+                asset = new AssetSpatialContractPayload
+                {
+                    asset_guid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    asset_path = "Assets/KayKit/banner.prefab",
+                    dependency_hash = "dependency-v1",
+                    units = "meter",
+                    forward = new[] { 0f, 0f, 1f },
+                    up = new[] { 0f, 1f, 0f },
+                    pivot_offset = new[] { 0f, 0f, 0f },
+                    collision_proxies = new List<SpatialObbContract>
+                    {
+                        new()
+                        {
+                            id = "banner",
+                            center = new[] { 0f, 1f, 0f },
+                            size = new[] { 1f, 2f, 0.05f },
+                            rotation = new[] { 0f, 0f, 0f, 1f }
+                        }
+                    },
+                    frames = new List<SpatialContactFrameContract>
+                    {
+                        new()
+                        {
+                            id = "back",
+                            point = new[] { 0f, 1f, -0.025f },
+                            normal = new[] { 0f, 0f, -1f },
+                            tangent = new[] { 1f, 0f, 0f },
+                            size = new[] { 1f, 2f }
+                        }
+                    },
+                    contacts = new List<SpatialContactRuleContract>
+                    {
+                        new()
+                        {
+                            id = "wall",
+                            kind = "WallMounted",
+                            frame_id = "back",
+                            target = "surface:wall",
+                            minimum_gap = 0.005f,
+                            maximum_gap = 0.01f,
+                            maximum_penetration = 0f,
+                            minimum_support = 0.6f,
+                            direction_alignment = 0.95f
+                        }
+                    },
+                    revision = 1,
+                    capture_set_hash = "capture-banner"
+                },
+                technical = new SpatialTechnicalEvidence
+                {
+                    passed = true,
+                    error_count = 0,
+                    report_hash = "report-banner"
                 }
             };
         }

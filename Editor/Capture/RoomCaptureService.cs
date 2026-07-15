@@ -17,6 +17,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private const int ManifestVersion = 1;
         private const string ManifestFileName = "capture-manifest.json";
 
+        // TestPlay intentionally launches Unity with -nographics. Keep capture-set,
+        // cache, and hashing tests independent from the graphics device while the
+        // real pixel-isolation test still exercises Render in a graphics-enabled run.
+        internal static Func<string, string, string> RenderOverrideForTests { get; set; }
+
         public static IReadOnlyList<string> CaptureAll(PreviewSession session)
         {
             ValidateSession(session);
@@ -529,6 +534,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static string Render(string directory, string name, Vector3 position, Quaternion rotation, bool orthographic, float orthographicSize, float fieldOfView, Scene captureScene)
         {
+            var renderOverride = RenderOverrideForTests;
+            if (renderOverride != null) return renderOverride(directory, name);
+
             var previousActiveScene = SceneManager.GetActiveScene();
             var restoreActiveScene = captureScene.IsValid() && captureScene.isLoaded &&
                                      previousActiveScene.IsValid() && previousActiveScene.isLoaded &&
