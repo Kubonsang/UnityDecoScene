@@ -97,6 +97,58 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return Current;
         }
 
+        /// <summary>
+        /// Rebuilds one Surface Arrangement while freezing every placement outside that arrangement.
+        /// The temporary freeze is removed after generation so the user's existing lock choices are
+        /// preserved rather than turning the whole room into permanently locked content.
+        /// </summary>
+        public static PreviewSession RegenerateArrangement(string arrangementId)
+        {
+            if (Current == null) throw new InvalidOperationException("Generate a room preview before regenerating one Surface Arrangement.");
+            if (string.IsNullOrWhiteSpace(arrangementId)) throw new ArgumentException("arrangementId is required.", nameof(arrangementId));
+            arrangementId = arrangementId.Trim();
+            if (!Current.Plan.SurfaceArrangements.Any(value => value != null &&
+                                                               string.Equals(value.arrangement_id, arrangementId, StringComparison.Ordinal)))
+                throw new InvalidOperationException($"Surface Arrangement '{arrangementId}' is not part of the active plan.");
+
+            SynchronizePreviewTransforms();
+            var active = Current;
+            var originalLockStates = active.Placements
+                .Where(value => value != null &&
+                                !string.Equals(value.arrangementId, arrangementId, StringComparison.Ordinal) &&
+                                !string.IsNullOrWhiteSpace(value.placementId))
+                .GroupBy(value => value.placementId, StringComparer.Ordinal)
+                .ToDictionary(value => value.Key, value => value.First().locked, StringComparer.Ordinal);
+            var frozen = BuildArrangementRegenerationLocks(active.Placements, arrangementId);
+            var request = new LayoutRequest(
+                active.Plan,
+                frozen,
+                active.AuthoringContext,
+                active.Request?.SupportContracts);
+            var regenerated = GeneratePreview(request, false);
+
+            foreach (var placement in regenerated.Placements)
+            {
+                if (placement == null || !originalLockStates.TryGetValue(placement.placementId ?? string.Empty, out var wasLocked)) continue;
+                placement.locked = wasLocked;
+                var marker = placement.previewObject != null ? placement.previewObject.GetComponent<PreviewPlacementMarker>() : null;
+                if (marker != null) marker.locked = wasLocked;
+            }
+            Changed?.Invoke();
+            return regenerated;
+        }
+
+        internal static IReadOnlyList<PlacedDecorItem> BuildArrangementRegenerationLocks(
+            IReadOnlyList<PlacedDecorItem> placements,
+            string arrangementId)
+        {
+            if (string.IsNullOrWhiteSpace(arrangementId)) throw new ArgumentException("arrangementId is required.", nameof(arrangementId));
+            return (placements ?? Array.Empty<PlacedDecorItem>())
+                .Where(value => value != null && !string.Equals(value.arrangementId, arrangementId.Trim(), StringComparison.Ordinal))
+                .Select(CloneForRegeneration)
+                .ToArray();
+        }
+
         public static bool SetLocked(IEnumerable<string> placementIds, bool locked)
         {
             if (Current == null) return false;

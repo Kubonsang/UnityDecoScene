@@ -240,6 +240,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             }
             if (RoomPreviewManager.Current?.AssetGaps?.gaps.Count > 0)
                 EditorGUILayout.HelpBox($"Active preview has {RoomPreviewManager.Current.AssetGaps.gaps.Count} asset gaps. Missing or unreviewed geometry is not substituted.", MessageType.Warning);
+
+            EditorGUILayout.Space(5f);
+            SurfaceArrangementCompositionEditor.Draw(plan, value => status = value);
         }
 
         private void DrawValidationSection()
