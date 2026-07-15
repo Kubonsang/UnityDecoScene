@@ -51,9 +51,108 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public static SpatialContractDocument Load(string path)
         {
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) throw new FileNotFoundException("Spatial contract not found.", path);
-            var document = JsonUtility.FromJson<SpatialContractDocument>(File.ReadAllText(path));
+            var json = PreserveNegativeZeroNumbers(File.ReadAllText(path));
+            var document = JsonUtility.FromJson<SpatialContractDocument>(json);
             if (document == null || document.contract_version != 1) throw new InvalidDataException("Unsupported spatial contract document.");
             return document;
+        }
+
+        /// <summary>
+        /// Unity's JsonUtility turns a JSON -0 token into positive float zero. Spatial Contract
+        /// hashes are shared with Go, whose canonical encoder preserves IEEE-754 negative zero.
+        /// Replace only negative-zero number tokens outside JSON strings with a tiny negative
+        /// finite sentinel; the hash canonicalizer rounds it back to -0 and imported geometry sees
+        /// a value far below every supported spatial tolerance.
+        /// </summary>
+        internal static string PreserveNegativeZeroNumbers(string json)
+        {
+            if (json == null) throw new ArgumentNullException(nameof(json));
+            var rewritten = new StringBuilder(json.Length + 16);
+            var inString = false;
+            var escaped = false;
+            for (var index = 0; index < json.Length; index++)
+            {
+                var character = json[index];
+                if (inString)
+                {
+                    rewritten.Append(character);
+                    if (escaped) escaped = false;
+                    else if (character == '\\') escaped = true;
+                    else if (character == '"') inString = false;
+                    continue;
+                }
+
+                if (character == '"')
+                {
+                    inString = true;
+                    rewritten.Append(character);
+                    continue;
+                }
+
+                if (character == '-' && TryReadNegativeZero(json, index, out var end))
+                {
+                    rewritten.Append("-1e-30");
+                    index = end - 1;
+                    continue;
+                }
+                rewritten.Append(character);
+            }
+            if (inString || escaped) throw new InvalidDataException("Spatial contract JSON contains an unterminated string.");
+            return rewritten.ToString();
+        }
+
+        private static bool TryReadNegativeZero(string json, int start, out int end)
+        {
+            end = start;
+            if (start < 0 || start + 1 >= json.Length || json[start] != '-' || json[start + 1] != '0' ||
+                !HasValueBoundaryBefore(json, start)) return false;
+
+            var cursor = start + 2;
+            if (cursor < json.Length && char.IsDigit(json[cursor])) return false;
+            if (cursor < json.Length && json[cursor] == '.')
+            {
+                cursor++;
+                var fractionStart = cursor;
+                while (cursor < json.Length && char.IsDigit(json[cursor]))
+                {
+                    if (json[cursor] != '0') return false;
+                    cursor++;
+                }
+                if (cursor == fractionStart) return false;
+            }
+
+            if (cursor < json.Length && (json[cursor] == 'e' || json[cursor] == 'E'))
+            {
+                cursor++;
+                if (cursor < json.Length && (json[cursor] == '+' || json[cursor] == '-')) cursor++;
+                var exponentStart = cursor;
+                while (cursor < json.Length && char.IsDigit(json[cursor])) cursor++;
+                if (cursor == exponentStart) return false;
+            }
+
+            if (!HasValueBoundaryAfter(json, cursor)) return false;
+            end = cursor;
+            return true;
+        }
+
+        private static bool HasValueBoundaryBefore(string json, int start)
+        {
+            for (var index = start - 1; index >= 0; index--)
+            {
+                if (char.IsWhiteSpace(json[index])) continue;
+                return json[index] == '[' || json[index] == ',' || json[index] == ':';
+            }
+            return true;
+        }
+
+        private static bool HasValueBoundaryAfter(string json, int end)
+        {
+            for (var index = end; index < json.Length; index++)
+            {
+                if (char.IsWhiteSpace(json[index])) continue;
+                return json[index] == ',' || json[index] == ']' || json[index] == '}';
+            }
+            return true;
         }
 
         public static string SerializeForStorage(SpatialContractDocument document, bool prettyPrint = true)

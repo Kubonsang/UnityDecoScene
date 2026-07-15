@@ -103,6 +103,35 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
         }
 
         [Test]
+        public void LoadPreservesNegativeZeroFromStoredJsonAndIgnoresStringContents()
+        {
+            var expected = KnownApprovedNegativeZeroTableContract();
+            var path = Path.Combine(Path.GetTempPath(), $"spatial-negative-zero-{System.Guid.NewGuid():N}.json");
+            try
+            {
+                var raw = SpatialContractIO.SerializeForStorage(expected, false);
+                Assert.That(raw, Does.Contain("-0"), "The storage fixture must contain a negative-zero number token.");
+                Assert.That(SpatialContractIO.PreserveNegativeZeroNumbers("{\"label\":\"keep -0 here\",\"value\":-0}"),
+                    Is.EqualTo("{\"label\":\"keep -0 here\",\"value\":-1e-30}"));
+                File.WriteAllText(path, raw);
+
+                var loaded = SpatialContractIO.Load(path);
+
+                Assert.That(System.BitConverter.ToInt32(
+                    System.BitConverter.GetBytes(loaded.asset.pivot_offset[0]), 0), Is.LessThan(0));
+                Assert.That(SpatialContractHashUtility.ComputeGeometryHash(loaded.asset), Is.EqualTo(
+                    "03ef438f92d4be2408a85f88cecd0f57f4d67ee826dce2b711740bfe19ade10b"));
+                Assert.That(SpatialContractHashUtility.ComputeContentHash(loaded), Is.EqualTo(
+                    "595585303e6629aa7f9d6755e91d5e2c2aae59f5ac51e6798caaf4b9a4fa447e"));
+                Assert.That(SpatialContractHashUtility.ValidateApproved(loaded, out var reason), Is.True, reason);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        [Test]
         public void ApprovedContractRejectsGeometryChangedAfterReview()
         {
             var document = KnownApprovedContract();
