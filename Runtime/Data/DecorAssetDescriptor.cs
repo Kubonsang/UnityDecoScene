@@ -143,6 +143,7 @@ namespace UnityDecoScene.DungeonDecorator
                 pivotOffset = bounds.center,
                 bottomContact = new ContactFrame { frameId = "bottom", localPoint = new Vector3(bounds.center.x, bounds.min.y, bounds.center.z), localNormal = Vector3.down, localTangent = Vector3.right, size = new Vector2(bounds.size.x, bounds.size.z) },
                 backContact = new ContactFrame { frameId = "back", localPoint = new Vector3(bounds.center.x, bounds.center.y, bounds.min.z), localNormal = Vector3.back, localTangent = Vector3.right, size = new Vector2(bounds.size.x, bounds.size.y) },
+                topContact = new ContactFrame { frameId = "top", localPoint = new Vector3(bounds.center.x, bounds.max.y, bounds.center.z), localNormal = Vector3.up, localTangent = Vector3.right, size = new Vector2(bounds.size.x, bounds.size.z) },
                 contact = ContactRules.Defaults(requirement),
                 inferenceConfidence = 0.5f,
                 reviewed = isReviewed

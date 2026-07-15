@@ -96,6 +96,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     pivotOffset = aggregate.center,
                     bottomContact = new ContactFrame { frameId = "bottom", localPoint = new Vector3(aggregate.center.x, aggregate.min.y, aggregate.center.z), localNormal = Vector3.down, localTangent = Vector3.right, size = new Vector2(aggregate.size.x, aggregate.size.z) },
                     backContact = new ContactFrame { frameId = "back", localPoint = new Vector3(aggregate.center.x, aggregate.center.y, aggregate.min.z), localNormal = Vector3.back, localTangent = Vector3.right, size = new Vector2(aggregate.size.x, aggregate.size.y) },
+                    topContact = new ContactFrame { frameId = "top", localPoint = new Vector3(aggregate.center.x, aggregate.max.y, aggregate.center.z), localNormal = Vector3.up, localTangent = Vector3.right, size = new Vector2(aggregate.size.x, aggregate.size.z) },
                     contact = ContactRules.Defaults(ContactRequirement.FloorSupported),
                     inferenceConfidence = colliders.Length > 0 ? 0.85f : 0.6f,
                     reviewed = false,

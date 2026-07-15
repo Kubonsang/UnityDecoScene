@@ -45,12 +45,21 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             "위/아래 면 · Local Up"
         };
 
+        private static readonly string[] SupportedBySubjectFrames = { "bottom", "back", "top" };
+        private static readonly List<string> SupportedBySubjectFrameLabels = new()
+        {
+            "바닥면 · bottom (기본)",
+            "뒷면 · back (책을 눕힐 때)",
+            "윗면 · top (뒤집어 놓을 때)"
+        };
+
         [SerializeField] private DecorAssetDescriptor descriptor;
         [SerializeField] private GameObject targetPrefab;
         [SerializeField] private GameObject wallSource;
         [SerializeField] private SpatialWallNormalAxis wallNormalAxis = SpatialWallNormalAxis.LocalForward;
         [SerializeField] private bool flipWallNormal;
         [SerializeField] private SpatialCalibrationTemplate template = SpatialCalibrationTemplate.WallMounted;
+        [SerializeField] private string supportedBySubjectFrameId = "bottom";
 
         private readonly BoxBoundsHandle boxHandle = new();
         private int selectedProxy;
@@ -77,6 +86,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private ObjectField descriptorField;
         private ObjectField wallField;
         private ObjectField targetField;
+        private DropdownField supportedBySubjectFrameField;
         private DropdownField relationshipField;
         private DropdownField axisField;
         private Toggle flipField;
@@ -240,6 +250,27 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 RefreshSetupState();
             });
             targetFields.Add(targetField);
+
+            var subjectFrameIndex = Mathf.Max(0, Array.IndexOf(SupportedBySubjectFrames, supportedBySubjectFrameId));
+            supportedBySubjectFrameField = new DropdownField("오브젝트의 접촉면", SupportedBySubjectFrameLabels, subjectFrameIndex)
+            {
+                name = "supported-by-subject-frame-field",
+                tooltip = "받침 상단에 닿을 오브젝트의 면입니다. 책을 평평하게 눕히려면 뒷면(back)을 선택하세요."
+            };
+            supportedBySubjectFrameField.RegisterValueChangedCallback(evt =>
+            {
+                var index = SupportedBySubjectFrameLabels.IndexOf(evt.newValue);
+                if (index >= 0) supportedBySubjectFrameId = SupportedBySubjectFrames[index];
+            });
+            targetFields.Add(supportedBySubjectFrameField);
+
+            var targetFrame = new TextField("받침의 접촉면")
+            {
+                value = "top",
+                isReadOnly = true,
+                tooltip = "Surface Arrangement 0.1에서는 평평한 받침의 상단만 지원합니다."
+            };
+            targetFields.Add(targetFrame);
         }
 
         private void BindButtons()
@@ -255,8 +286,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private void StartCalibration() => RunSafe(() =>
         {
             if (!CanStart(out var reason)) throw new InvalidOperationException(reason);
-            SpatialCalibrationSession.Begin(
+            var session = SpatialCalibrationSession.Begin(
                 descriptor, targetPrefab, template, wallSource, wallNormalAxis, flipWallNormal);
+            if (template == SpatialCalibrationTemplate.SupportedBy)
+                session.ConfigureSupportedByFrames(supportedBySubjectFrameId, "top");
             selectedProxy = 0;
             SetStatus("정답 자세를 만들어 주세요", "Scene View에서 오브젝트를 이동·회전한 뒤 기술 검사를 실행하세요.", StatusTone.Neutral);
         });
@@ -435,6 +468,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             AddSummary("검수 대상", session.Descriptor.Prefab.name);
             AddSummary("공간 관계", RelationshipLabels[Mathf.Max(0, Array.IndexOf(RelationshipValues, session.Template))]);
             AddSummary("세션", session.SessionId[..Mathf.Min(8, session.SessionId.Length)]);
+            if (session.Template == SpatialCalibrationTemplate.SupportedBy)
+                AddSummary("접촉면", $"{session.SupportedBySubjectFrameId} → {session.SupportedByTargetFrameId}");
             if (session.SourceWallObject != null)
             {
                 AddSummary("기준 벽", session.SourceWallObject.name);
@@ -508,6 +543,18 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private void BuildRuleControls(SpatialCalibrationSession session)
         {
             rulesControls.Clear();
+            if (session.Template == SpatialCalibrationTemplate.SupportedBy)
+            {
+                var index = Mathf.Max(0, Array.IndexOf(SupportedBySubjectFrames, session.SupportedBySubjectFrameId));
+                var frame = new DropdownField("오브젝트의 접촉면", SupportedBySubjectFrameLabels, index);
+                frame.RegisterValueChangedCallback(evt =>
+                {
+                    var selected = SupportedBySubjectFrameLabels.IndexOf(evt.newValue);
+                    if (selected >= 0) session.ConfigureSupportedByFrames(SupportedBySubjectFrames[selected], "top");
+                });
+                rulesControls.Add(frame);
+                AddAction(rulesControls, "선택한 면을 받침 상단에 다시 맞추기", session.AlignSupportedBySubjectFrameToTarget);
+            }
             foreach (var rule in session.Rules)
             {
                 var card = new VisualElement(); card.AddToClassList("rule-card");
@@ -644,6 +691,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             }
             DrawFrame(transform, session.Frame("bottom"), Color.green);
             DrawFrame(transform, session.Frame("back"), new Color(1f, 0.55f, 0.1f));
+            DrawFrame(transform, session.Frame("top"), new Color(0.2f, 0.65f, 1f));
             if (session.Template is SpatialCalibrationTemplate.WallMounted or SpatialCalibrationTemplate.WallBackedFloorSupported)
                 DrawWallSurface(session.WallSurface);
         }

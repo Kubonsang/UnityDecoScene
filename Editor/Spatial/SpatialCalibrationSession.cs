@@ -20,6 +20,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public SpatialWallNormalAxis WallNormalAxis { get; }
         public bool FlipWallNormal { get; }
         public SpatialCalibrationTemplate Template { get; }
+        public string SupportedBySubjectFrameId { get; private set; }
+        public string SupportedByTargetFrameId { get; private set; }
         public DecorGeometryProfile Geometry { get; }
         public GameObject SubjectObject { get; private set; }
         public GameObject TargetObject { get; private set; }
@@ -47,7 +49,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             SpatialCalibrationTemplate template,
             GameObject sourceWallObject,
             SpatialWallNormalAxis wallNormalAxis,
-            bool flipWallNormal)
+            bool flipWallNormal,
+            string supportedBySubjectFrameId,
+            string supportedByTargetFrameId)
         {
             Descriptor = descriptor;
             TargetPrefab = targetPrefab;
@@ -55,6 +59,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             SourceWallObject = sourceWallObject;
             WallNormalAxis = wallNormalAxis;
             FlipWallNormal = flipWallNormal;
+            SupportedBySubjectFrameId = NormalizeSubjectFrame(supportedBySubjectFrameId);
+            SupportedByTargetFrameId = NormalizeTargetFrame(supportedByTargetFrameId);
             Geometry = DecorAssetScanner.BuildGeometryProfile(descriptor.Prefab);
             Geometry.reviewed = false;
             BuildRules();
@@ -68,15 +74,37 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             DecorAssetDescriptor descriptor,
             GameObject targetPrefab,
             SpatialCalibrationTemplate template,
+            string supportedBySubjectFrameId,
+            string supportedByTargetFrameId)
+            => BeginCore(descriptor, targetPrefab, template, null, SpatialWallNormalAxis.LocalForward, false,
+                supportedBySubjectFrameId, supportedByTargetFrameId);
+
+        public static SpatialCalibrationSession Begin(
+            DecorAssetDescriptor descriptor,
+            GameObject targetPrefab,
+            SpatialCalibrationTemplate template,
             GameObject sourceWallObject,
             SpatialWallNormalAxis wallNormalAxis,
             bool flipWallNormal)
+            => BeginCore(descriptor, targetPrefab, template, sourceWallObject, wallNormalAxis, flipWallNormal,
+                "bottom", "top");
+
+        private static SpatialCalibrationSession BeginCore(
+            DecorAssetDescriptor descriptor,
+            GameObject targetPrefab,
+            SpatialCalibrationTemplate template,
+            GameObject sourceWallObject,
+            SpatialWallNormalAxis wallNormalAxis,
+            bool flipWallNormal,
+            string supportedBySubjectFrameId,
+            string supportedByTargetFrameId)
         {
             if (descriptor == null || descriptor.Prefab == null) throw new ArgumentException("A descriptor with a prefab is required.");
             if (template == SpatialCalibrationTemplate.SupportedBy && targetPrefab == null) throw new ArgumentException("SupportedBy requires a target prefab.");
             Current?.Dispose();
             Current = new SpatialCalibrationSession(
-                descriptor, targetPrefab, template, sourceWallObject, wallNormalAxis, flipWallNormal);
+                descriptor, targetPrefab, template, sourceWallObject, wallNormalAxis, flipWallNormal,
+                supportedBySubjectFrameId, supportedByTargetFrameId);
             Changed?.Invoke();
             return Current;
         }
@@ -93,8 +121,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public ContactFrame Frame(string id)
         {
-            if (id == "bottom") return Geometry.bottomContact;
-            if (id == "back") return Geometry.backContact;
+            if (string.Equals(id, "bottom", StringComparison.OrdinalIgnoreCase)) return Geometry.bottomContact;
+            if (string.Equals(id, "back", StringComparison.OrdinalIgnoreCase)) return Geometry.backContact;
+            if (!string.Equals(id, "top", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentOutOfRangeException(nameof(id), id, "Contact frame must be bottom, back, or top.");
             var bounds = new Bounds(Descriptor.LocalBoundsCenter, Descriptor.LocalBoundsSize);
             return new ContactFrame
             {
@@ -105,6 +135,20 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 size = new Vector2(bounds.size.x, bounds.size.z)
             };
         }
+
+        public void ConfigureSupportedByFrames(string subjectFrameId, string targetFrameId)
+        {
+            if (Template != SpatialCalibrationTemplate.SupportedBy)
+                throw new InvalidOperationException("Contact frame selection is available only for SupportedBy calibration.");
+            SupportedBySubjectFrameId = NormalizeSubjectFrame(subjectFrameId);
+            SupportedByTargetFrameId = NormalizeTargetFrame(targetFrameId);
+            var support = rules.Single(rule => string.Equals(rule.kind, "SupportedBy", StringComparison.Ordinal));
+            support.frame_id = SupportedBySubjectFrameId;
+            AlignSupportedBySubjectFrameToTarget(false);
+            NotifyChanged();
+        }
+
+        public void AlignSupportedBySubjectFrameToTarget() => AlignSupportedBySubjectFrameToTarget(true);
 
         public Bounds CombinedWorldBounds()
         {
@@ -188,9 +232,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     position = new Vector3(-bottom.x, -bottom.y, -bottom.z);
                     break;
                 case SpatialCalibrationTemplate.SupportedBy:
-                    var targetBounds = TargetWorldBounds();
-                    position = new Vector3(targetBounds.center.x - bottom.x, targetBounds.max.y - bottom.y, targetBounds.center.z - bottom.z);
-                    break;
+                    AlignSupportedBySubjectFrameToTarget(false);
+                    return;
             }
             SubjectObject.transform.SetPositionAndRotation(position, Quaternion.identity);
         }
@@ -210,7 +253,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     rules.Add(Rule("floor", "FloorSupported", "bottom", "surface:floor", 0f, 0.01f));
                     break;
                 case SpatialCalibrationTemplate.SupportedBy:
-                    rules.Add(Rule("support", "SupportedBy", "bottom", "asset:target", 0f, 0.01f));
+                    rules.Add(Rule("support", "SupportedBy", SupportedBySubjectFrameId, "asset:target", 0f, 0.01f));
                     break;
             }
         }
@@ -227,6 +270,41 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             minimum_support = 0.6f,
             direction_alignment = 0.95f
         };
+
+        private void AlignSupportedBySubjectFrameToTarget(bool notify)
+        {
+            if (Template != SpatialCalibrationTemplate.SupportedBy || SubjectObject == null || TargetObject == null)
+                throw new InvalidOperationException("SupportedBy subject and target objects are required before alignment.");
+            var frame = Frame(SupportedBySubjectFrameId);
+            var targetBounds = TargetWorldBounds();
+            var targetNormal = Vector3.up;
+            var targetTangent = Vector3.right;
+            var normalAlignment = Quaternion.FromToRotation(frame.localNormal.normalized, -targetNormal);
+            var tangentAfterNormal = Vector3.ProjectOnPlane(normalAlignment * frame.localTangent, targetNormal).normalized;
+            var tangentAlignment = tangentAfterNormal.sqrMagnitude > 0.000001f
+                ? Quaternion.FromToRotation(tangentAfterNormal, targetTangent)
+                : Quaternion.identity;
+            var rotation = tangentAlignment * normalAlignment;
+            SubjectObject.transform.SetPositionAndRotation(Vector3.zero, rotation);
+            var targetPoint = new Vector3(targetBounds.center.x, targetBounds.max.y, targetBounds.center.z);
+            SubjectObject.transform.position = targetPoint - SubjectObject.transform.TransformVector(frame.localPoint);
+            if (notify) NotifyChanged();
+        }
+
+        private static string NormalizeSubjectFrame(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "bottom";
+            if (string.Equals(value, "bottom", StringComparison.OrdinalIgnoreCase)) return "bottom";
+            if (string.Equals(value, "back", StringComparison.OrdinalIgnoreCase)) return "back";
+            if (string.Equals(value, "top", StringComparison.OrdinalIgnoreCase)) return "top";
+            throw new ArgumentOutOfRangeException(nameof(value), value, "SupportedBy subject frame must be bottom, back, or top.");
+        }
+
+        private static string NormalizeTargetFrame(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || string.Equals(value, "top", StringComparison.OrdinalIgnoreCase)) return "top";
+            throw new ArgumentOutOfRangeException(nameof(value), value, "Surface Arrangement 0.1 supports only the target top frame.");
+        }
 
         private static GameObject InstantiateTemporary(GameObject prefab, string label)
         {

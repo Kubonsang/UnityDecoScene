@@ -70,6 +70,7 @@ namespace UnityDecoScene.DungeonDecorator
         public Vector3 pivotOffset;
         public ContactFrame bottomContact = new() { frameId = "bottom", localNormal = Vector3.down, localTangent = Vector3.right };
         public ContactFrame backContact = new() { frameId = "back", localNormal = Vector3.back, localTangent = Vector3.right };
+        public ContactFrame topContact = new() { frameId = "top", localNormal = Vector3.up, localTangent = Vector3.right };
         public ContactRules contact = ContactRules.Defaults(ContactRequirement.FloorSupported);
         public List<ContactRules> contacts = new();
         [Range(0f, 1f)] public float inferenceConfidence;
@@ -109,6 +110,7 @@ namespace UnityDecoScene.DungeonDecorator
             if (contacts.Count > 0) contact = contacts[0];
             bottomContact ??= new ContactFrame { frameId = "bottom", localNormal = Vector3.down, localTangent = Vector3.right };
             backContact ??= new ContactFrame { frameId = "back", localNormal = Vector3.back, localTangent = Vector3.right };
+            topContact ??= new ContactFrame { frameId = "top", localNormal = Vector3.up, localTangent = Vector3.right };
         }
 
         public ContactFrame FrameFor(ContactRules rules)
@@ -117,6 +119,14 @@ namespace UnityDecoScene.DungeonDecorator
             if (string.Equals(rules.frameId, "back", StringComparison.OrdinalIgnoreCase)) return backContact;
             if (string.Equals(rules.frameId, "bottom", StringComparison.OrdinalIgnoreCase)) return bottomContact;
             return rules.requirement is ContactRequirement.WallBacked or ContactRequirement.WallMounted ? backContact : bottomContact;
+        }
+
+        public ContactFrame Frame(string frameId)
+        {
+            if (string.Equals(frameId, "bottom", StringComparison.OrdinalIgnoreCase)) return bottomContact;
+            if (string.Equals(frameId, "back", StringComparison.OrdinalIgnoreCase)) return backContact;
+            if (string.Equals(frameId, "top", StringComparison.OrdinalIgnoreCase)) return topContact;
+            return null;
         }
 
         private static void NormalizeContact(ContactRules rules)

@@ -145,6 +145,53 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
             }
         }
 
+        [Test]
+        public void SupportedByBackFrameLaysSubjectFlatAndPersistsSelectedFrames()
+        {
+            var subject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            subject.transform.localScale = new Vector3(0.2f, 0.5f, 0.355f);
+            var target = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            target.transform.localScale = new Vector3(2f, 0.5f, 1.5f);
+            var descriptor = ScriptableObject.CreateInstance<DecorAssetDescriptor>();
+            IReadOnlyList<string> paths = null;
+            try
+            {
+                descriptor.InitializeFromScan("flat-book", subject,
+                    new Bounds(Vector3.zero, new Vector3(0.2f, 0.5f, 0.355f)), DecorAssetType.Prop);
+                var session = SpatialCalibrationSession.Begin(
+                    descriptor, target, SpatialCalibrationTemplate.SupportedBy, "back", "top");
+                try
+                {
+                    Assert.That(session.Rules.Single().frame_id, Is.EqualTo("back"));
+                    Assert.That(Vector3.Dot(
+                        session.SubjectObject.transform.TransformDirection(session.Frame("back").localNormal).normalized,
+                        Vector3.down), Is.GreaterThan(0.999f));
+                    var report = SpatialCalibrationValidator.Validate(session);
+                    Assert.That(report.error_count, Is.Zero, string.Join("\n", report.errors));
+                    paths = SpatialContractIO.WriteDrafts(session, report, new SpatialCaptureSet
+                    {
+                        session_id = session.SessionId,
+                        capture_set_hash = "flat-capture"
+                    });
+                    var interaction = SpatialContractIO.Load(paths.Single(path => path.EndsWith(".interaction.json")));
+                    Assert.That(interaction.interaction.subject_frame, Is.EqualTo("back"));
+                    Assert.That(interaction.interaction.target_frame, Is.EqualTo("top"));
+
+                    session.ConfigureSupportedByFrames("bottom", "top");
+                    Assert.That(session.Rules.Single().frame_id, Is.EqualTo("bottom"));
+                    Assert.That(session.LastReport, Is.Null);
+                }
+                finally { session.Dispose(); }
+            }
+            finally
+            {
+                foreach (var path in paths ?? System.Array.Empty<string>()) File.Delete(path);
+                Object.DestroyImmediate(descriptor);
+                Object.DestroyImmediate(subject);
+                Object.DestroyImmediate(target);
+            }
+        }
+
         private static SpatialContractDocument KnownApprovedContract()
         {
             var asset = new AssetSpatialContractPayload
