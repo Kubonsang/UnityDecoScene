@@ -256,8 +256,16 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private static void Number(StringBuilder json, float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) throw new ArgumentException("Spatial Contract numbers must be finite.");
+            var negative = BitConverter.ToInt32(BitConverter.GetBytes(value), 0) < 0;
             var rounded = Math.Round((double)value, 6, MidpointRounding.AwayFromZero);
-            if (Math.Abs(rounded) < 0.0000005d) rounded = 0d;
+            if (rounded == 0d)
+            {
+                // Go's math.Round/json.Marshal pipeline preserves IEEE-754 negative zero. Existing
+                // human-approved contracts are hash-bound to that representation, so C# must do
+                // the same instead of silently turning -0 into 0.
+                json.Append(negative ? "-0" : "0");
+                return;
+            }
             json.Append(rounded.ToString("0.######", CultureInfo.InvariantCulture));
         }
 

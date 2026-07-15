@@ -89,6 +89,20 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
         }
 
         [Test]
+        public void NegativeZeroHashMatchesUnityCtxApprovedTableVector()
+        {
+            var document = KnownApprovedNegativeZeroTableContract();
+            Assert.That(System.BitConverter.ToInt32(
+                System.BitConverter.GetBytes(document.asset.pivot_offset[0]), 0), Is.LessThan(0),
+                "The fixture must retain IEEE-754 negative zero instead of testing ordinary zero.");
+            Assert.That(SpatialContractHashUtility.ComputeGeometryHash(document.asset), Is.EqualTo(
+                "03ef438f92d4be2408a85f88cecd0f57f4d67ee826dce2b711740bfe19ade10b"));
+            Assert.That(SpatialContractHashUtility.ComputeContentHash(document), Is.EqualTo(
+                "595585303e6629aa7f9d6755e91d5e2c2aae59f5ac51e6798caaf4b9a4fa447e"));
+            Assert.That(SpatialContractHashUtility.ValidateApproved(document, out var reason), Is.True, reason);
+        }
+
+        [Test]
         public void ApprovedContractRejectsGeometryChangedAfterReview()
         {
             var document = KnownApprovedContract();
@@ -278,6 +292,97 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
                     decision = SpatialContractStates.Approved,
                     contract_hash = "b4e4805e72353ebcef824c4cdb509c78e7b8ea509e6bd593f7ea0c6f2cb61a5a",
                     capture_set_hash = "capture",
+                    reviewer = "local-user",
+                    revision = 1
+                }
+            };
+        }
+
+        private static SpatialContractDocument KnownApprovedNegativeZeroTableContract()
+        {
+            var negativeZero = System.BitConverter.ToSingle(new byte[] { 0, 0, 0, 128 }, 0);
+            var asset = new AssetSpatialContractPayload
+            {
+                asset_guid = "a3fa97880303a42f48b512df88e92628",
+                asset_path = "Assets/KayKit_DungeonRemastered_1.1_SOURCE/Assets/fbx(unity)/table_medium.fbx",
+                dependency_hash = "283f72daa9e5a3be1a1ef522e9b5d527",
+                units = "meter",
+                forward = new[] { 0f, 0f, 1f },
+                up = new[] { 0f, 1f, 0f },
+                pivot_offset = new[] { negativeZero, 0.5f, 0f },
+                collision_proxies = new List<SpatialObbContract>
+                {
+                    new()
+                    {
+                        id = "renderer-0",
+                        center = new[] { negativeZero, 0.5f, 0f },
+                        size = new[] { 2f, 1f, 2f },
+                        rotation = new[] { 0f, 0f, 0f, 1f }
+                    }
+                },
+                frames = new List<SpatialContactFrameContract>
+                {
+                    new()
+                    {
+                        id = "back",
+                        point = new[] { negativeZero, 0.5f, -1f },
+                        normal = new[] { 0f, 0f, -1f },
+                        tangent = new[] { 1f, 0f, 0f },
+                        size = new[] { 2f, 1.000001f }
+                    },
+                    new()
+                    {
+                        id = "bottom",
+                        point = new[] { negativeZero, negativeZero, 0f },
+                        normal = new[] { 0f, -1f, 0f },
+                        tangent = new[] { 1f, 0f, 0f },
+                        size = new[] { 2f, 2f }
+                    },
+                    new()
+                    {
+                        id = "top",
+                        point = new[] { negativeZero, 1f, 0f },
+                        normal = new[] { 0f, 1f, 0f },
+                        tangent = new[] { 1f, 0f, 0f },
+                        size = new[] { 2f, 2f }
+                    }
+                },
+                contacts = new List<SpatialContactRuleContract>
+                {
+                    new()
+                    {
+                        id = "floor",
+                        kind = "FloorSupported",
+                        frame_id = "bottom",
+                        target = "surface:floor",
+                        minimum_gap = 0f,
+                        maximum_gap = 0.01f,
+                        maximum_penetration = 0f,
+                        minimum_support = 0.6f,
+                        direction_alignment = 0.95f
+                    }
+                },
+                revision = 1,
+                geometry_hash = "03ef438f92d4be2408a85f88cecd0f57f4d67ee826dce2b711740bfe19ade10b",
+                capture_set_hash = "f30da4a06f6652089688e95fbe19919f8b42783bb446f9874486ad91aebfe2a4"
+            };
+            return new SpatialContractDocument
+            {
+                contract_version = 1,
+                contract_type = "asset",
+                state = SpatialContractStates.Approved,
+                asset = asset,
+                technical = new SpatialTechnicalEvidence
+                {
+                    passed = true,
+                    error_count = 0,
+                    report_hash = "685b1cfc6d78dc1e9fab3abca0c9fd947d5e75d89e0045a069be3651b8119bb7"
+                },
+                review = new SpatialHumanReview
+                {
+                    decision = SpatialContractStates.Approved,
+                    contract_hash = "595585303e6629aa7f9d6755e91d5e2c2aae59f5ac51e6798caaf4b9a4fa447e",
+                    capture_set_hash = "f30da4a06f6652089688e95fbe19919f8b42783bb446f9874486ad91aebfe2a4",
                     reviewer = "local-user",
                     revision = 1
                 }
