@@ -47,7 +47,8 @@ const tools = [
   tool("begin_spatial_calibration", "Open a non-persistent Unity PreviewSceneStage for a reviewed descriptor. This does not approve, apply, or write a contract.", {
     descriptorAssetPath: { type: "string", description: "Unity asset path to a DecorAssetDescriptor." },
     template: { type: "string", enum: ["WallMounted", "WallBackedFloorSupported", "FloorSupported", "SupportedBy"] },
-    targetPrefabPath: { type: "string", description: "Required only for SupportedBy." },
+    targetDescriptorAssetPath: { type: "string", description: "Required for SupportedBy. The descriptor must contain current human-reviewed target geometry." },
+    targetPrefabPath: { type: "string", description: "Legacy field. Prefab-only SupportedBy targets are rejected because their support region is unreviewed." },
     subjectFrameId: { type: "string", enum: ["bottom", "back", "top"], description: "Optional SupportedBy contact frame. Defaults to bottom; use back to lay an upright book flat." },
     targetFrameId: { type: "string", enum: ["top"], description: "Optional SupportedBy target frame. Surface Arrangement 0.1 supports top only." }
   }, ["descriptorAssetPath", "template"]),
@@ -189,6 +190,12 @@ function compositionTool(name, description) {
     catalogAssetPath: { type: "string", description: "Unity asset path to DecorCatalog." },
     seed: { type: "integer", default: 12345 },
     density: { type: "number", minimum: 0, maximum: 1, default: 0.5 },
+    sourcePreviewSessionId: { type: "string", description: "Optional stale guard when inheriting the active preview's authoring and support-contract context." },
+    surfaceArrangements: {
+      type: "array",
+      description: "Optional complete replacement for Surface Arrangement specs. Omit to inherit the active same-room specs; pass [] to clear them.",
+      items: surfaceArrangementSchema()
+    },
     elements: {
       type: "array",
       items: {
@@ -208,6 +215,47 @@ function compositionTool(name, description) {
       }
     }
   }, ["roomId", "briefAssetPath", "catalogAssetPath", "elements"]);
+}
+
+function surfaceArrangementSchema() {
+  return {
+    type: "object",
+    properties: {
+      surface_arrangement_version: { type: "integer", const: 1, default: 1 },
+      arrangement_id: { type: "string" },
+      target_element_id: { type: "string" },
+      target_frame_id: { type: "string", enum: ["top"], default: "top" },
+      members: {
+        type: "array",
+        minItems: 1,
+        maxItems: 12,
+        items: {
+          type: "object",
+          properties: {
+            descriptor_id: { type: "string" },
+            minimum_count: { type: "integer", minimum: 0, maximum: 12 },
+            maximum_count: { type: "integer", minimum: 1, maximum: 12 },
+            selection_weight: { type: "number", minimum: 0, maximum: 1 },
+            affinity_group: { type: "string" }
+          },
+          required: ["descriptor_id", "minimum_count", "maximum_count", "selection_weight", "affinity_group"],
+          additionalProperties: false
+        }
+      },
+      preset: { type: "string", enum: ["Neat", "InUse", "Scattered"] },
+      amount: { type: "number", minimum: 0, maximum: 1 },
+      orderliness: { type: "number", minimum: 0, maximum: 1 },
+      grouping: { type: "number", minimum: 0, maximum: 1 },
+      stacking: { type: "number", minimum: 0, maximum: 1 },
+      edge_margin: { type: "number", minimum: 0.04 },
+      max_stack_height: { type: "integer", minimum: 1, maximum: 3 },
+      seed_offset: { type: "integer", minimum: 0 },
+      resolver_version: { type: "integer", const: 1, default: 1 },
+      spec_hash: { type: "string" }
+    },
+    required: ["arrangement_id", "target_element_id", "target_frame_id", "members", "preset", "amount", "orderliness", "grouping", "stacking", "edge_margin", "max_stack_height"],
+    additionalProperties: false
+  };
 }
 
 function prettyResult(value) {
