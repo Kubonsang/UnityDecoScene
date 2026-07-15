@@ -69,8 +69,8 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             var first = Pack(fixture);
             var second = Pack(fixture);
 
-            Assert.That(first.AssetGaps.gaps, Is.Empty);
-            Assert.That(second.AssetGaps.gaps, Is.Empty);
+            Assert.That(first.AssetGaps.gaps, Is.Empty, DescribeGaps(first));
+            Assert.That(second.AssetGaps.gaps, Is.Empty, DescribeGaps(second));
             var left = ArrangementPlacements(first);
             var right = ArrangementPlacements(second);
             Assert.That(right.Select(value => value.placementId), Is.EqualTo(left.Select(value => value.placementId)));
@@ -94,7 +94,7 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             var books = arranged.Where(value => value.descriptor.AssetId.StartsWith("book-", StringComparison.Ordinal)).ToArray();
             var candles = arranged.Where(value => value.descriptor.AssetId == "candle-lit").ToArray();
 
-            Assert.That(result.AssetGaps.gaps, Is.Empty);
+            Assert.That(result.AssetGaps.gaps, Is.Empty, DescribeGaps(result));
             Assert.That(books, Has.Length.EqualTo(4));
             Assert.That(candles, Has.Length.EqualTo(1));
             Assert.That(books.Max(value => value.stackLevel), Is.EqualTo(3), "The explicit book-on-book interaction should exercise the three-level limit.");
@@ -329,6 +329,9 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             .Where(value => !string.IsNullOrWhiteSpace(value.arrangementId))
             .OrderBy(value => value.placementId, StringComparer.Ordinal)
             .ToArray();
+
+        private static string DescribeGaps(LayoutResult result) => string.Join(" | ",
+            result.AssetGaps.gaps.Select(value => $"{value.code}: {value.reason}"));
 
         private static PlacedDecorItem CloneLocked(PlacedDecorItem source) => new()
         {
