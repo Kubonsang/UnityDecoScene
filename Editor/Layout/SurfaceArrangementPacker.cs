@@ -210,7 +210,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var relativeRotation = SpatialContractArrays.Quaternion(interaction.relative_rotation);
             var baseRotation = support.rotation * relativeRotation;
             var yawLimit = Mathf.Clamp(interaction.angle_tolerance, 0f, 180f);
-            var randomYaw = (Unit(seed, taskIndex, attempt, 2) * 2f - 1f) * yawLimit;
+            // Always test the human-approved relative pose first. This is essential for equal-footprint
+            // stacks: any non-zero yaw can enlarge the projected footprint beyond the supporting book.
+            var randomYaw = attempt == 0
+                ? 0f
+                : (CandidateUnit(seed, taskIndex, attempt, 2) * 2f - 1f) * yawLimit;
             var yaw = randomYaw * (1f - spec.Orderliness);
             var rotation = Quaternion.AngleAxis(yaw, surface.Normal) * baseRotation;
             var subjectNormal = (rotation * subjectFrame.localNormal).normalized;
@@ -231,14 +235,19 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var rows = Mathf.Max(1, Mathf.CeilToInt(taskCount / (float)columns));
             var gridX = columns == 1 ? 0f : Mathf.Lerp(-rangeX, rangeX, column / (float)(columns - 1));
             var gridY = rows == 1 ? 0f : Mathf.Lerp(-rangeY, rangeY, row / (float)(rows - 1));
-            var randomX = Mathf.Lerp(-rangeX, rangeX, Unit(seed, taskIndex, attempt, 0));
-            var randomY = Mathf.Lerp(-rangeY, rangeY, Unit(seed, taskIndex, attempt, 1));
+            var randomX = Mathf.Lerp(-rangeX, rangeX, CandidateUnit(seed, taskIndex, attempt, 0));
+            var randomY = Mathf.Lerp(-rangeY, rangeY, CandidateUnit(seed, taskIndex, attempt, 1));
             var groupX = Mathf.Lerp(-rangeX, rangeX, Unit(seed, StableText(task.Member.affinity_group), 0, 0));
             var groupY = Mathf.Lerp(-rangeY, rangeY, Unit(seed, StableText(task.Member.affinity_group), 0, 1));
-            var x = Mathf.Lerp(randomX, gridX, spec.Orderliness);
-            var y = Mathf.Lerp(randomY, gridY, spec.Orderliness);
-            x = Mathf.Lerp(x, groupX, spec.Grouping * 0.7f);
-            y = Mathf.Lerp(y, groupY, spec.Grouping * 0.7f);
+            // Sliders rank valid compositions; they must not make technically valid space unreachable.
+            // Reserve the final quarter of the deterministic sequence for full-surface exploration.
+            var exploreFullSurface = attempt >= CandidateAttempts * 3 / 4;
+            var orderliness = exploreFullSurface ? 0f : spec.Orderliness;
+            var grouping = exploreFullSurface ? 0f : spec.Grouping * 0.7f;
+            var x = Mathf.Lerp(randomX, gridX, orderliness);
+            var y = Mathf.Lerp(randomY, gridY, orderliness);
+            x = Mathf.Lerp(x, groupX, grouping);
+            y = Mathf.Lerp(y, groupY, grouping);
 
             var relativePosition = SpatialContractArrays.Vector(interaction.relative_position);
             var approvedContact = relativePosition + relativeRotation * Vector3.Scale(subjectFrame.localPoint, scale);
@@ -496,6 +505,26 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 value ^= value >> 13; value *= 1274126177; value ^= value >> 16;
                 return (value & 0x00ffffff) / 16777216f;
             }
+        }
+
+        private static float CandidateUnit(int seed, int taskIndex, int attempt, int dimension)
+        {
+            var radix = dimension switch { 0 => 2, 1 => 3, _ => 5 };
+            var rotation = Unit(seed, taskIndex, dimension, 7919);
+            return Mathf.Repeat(RadicalInverse(attempt + 1, radix) + rotation, 1f);
+        }
+
+        private static float RadicalInverse(int index, int radix)
+        {
+            var result = 0f;
+            var fraction = 1f / radix;
+            while (index > 0)
+            {
+                result += index % radix * fraction;
+                index /= radix;
+                fraction /= radix;
+            }
+            return result;
         }
 
         private readonly struct ItemTask
