@@ -148,13 +148,10 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             samples.Sort();
             var minimum = samples[0];
             var median = samples[samples.Count / 2];
-            Assert.Multiple(() =>
-            {
-                Assert.That(median, Is.LessThan(100d),
-                    $"12-item arrangement median was {median:F2}ms (min {minimum:F2}ms; samples {string.Join(", ", samples.Select(value => value.ToString("F2")))}). ");
-                Assert.That(minimum, Is.LessThan(100d),
-                    $"No post-warmup 12-item sample met the 100ms target; min was {minimum:F2}ms.");
-            });
+            Assert.That(median, Is.LessThan(100d),
+                $"12-item arrangement median was {median:F2}ms (min {minimum:F2}ms; samples {string.Join(", ", samples.Select(value => value.ToString("F2")))}). ");
+            Assert.That(minimum, Is.LessThan(100d),
+                $"No post-warmup 12-item sample met the 100ms target; min was {minimum:F2}ms.");
         }
 
         [Test]
