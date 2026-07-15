@@ -59,10 +59,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (rule.target == "surface:floor")
                 return new SpatialCalibrationSurface(
                     Vector3.zero, Vector3.up, Vector3.right, Vector3.forward, new Vector2(6f, 6f));
-            var bounds = session.TargetWorldBounds();
-            return new SpatialCalibrationSurface(
-                new Vector3(bounds.center.x, bounds.max.y, bounds.center.z),
-                Vector3.up, Vector3.right, Vector3.forward, new Vector2(bounds.size.x, bounds.size.z));
+            return session.TargetSurface(session.SupportedByTargetFrameId);
         }
 
         private static IEnumerable<Vector3> Corners(Transform subject, OrientedBoxProxy proxy)

@@ -54,12 +54,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         };
 
         [SerializeField] private DecorAssetDescriptor descriptor;
-        [SerializeField] private GameObject targetPrefab;
+        [SerializeField] private DecorAssetDescriptor targetDescriptor;
         [SerializeField] private GameObject wallSource;
         [SerializeField] private SpatialWallNormalAxis wallNormalAxis = SpatialWallNormalAxis.LocalForward;
         [SerializeField] private bool flipWallNormal;
         [SerializeField] private SpatialCalibrationTemplate template = SpatialCalibrationTemplate.WallMounted;
         [SerializeField] private string supportedBySubjectFrameId = "bottom";
+        [SerializeField] private string selectedContactFrameId = "top";
 
         private readonly BoxBoundsHandle boxHandle = new();
         private int selectedProxy;
@@ -236,20 +237,24 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             flipField.RegisterValueChangedCallback(evt => flipWallNormal = evt.newValue);
             wallFields.Add(flipField);
 
-            targetField = new ObjectField("받침 오브젝트")
+            targetField = new ObjectField("검수된 받침 Descriptor")
             {
-                name = "target-prefab-field",
-                objectType = typeof(GameObject),
+                name = "target-descriptor-field",
+                objectType = typeof(DecorAssetDescriptor),
                 allowSceneObjects = false,
-                tooltip = "테이블 위 소품처럼 다른 프리팹 위에 놓는 경우 받침 프리팹을 선택합니다."
+                tooltip = "테이블 위 소품처럼 다른 에셋 위에 놓는 경우, 승인된 top 배치 영역이 들어 있는 Descriptor를 선택합니다."
             };
-            targetField.SetValueWithoutNotify(targetPrefab);
+            targetField.SetValueWithoutNotify(targetDescriptor);
             targetField.RegisterValueChangedCallback(evt =>
             {
-                targetPrefab = evt.newValue as GameObject;
+                targetDescriptor = evt.newValue as DecorAssetDescriptor;
                 RefreshSetupState();
             });
             targetFields.Add(targetField);
+
+            targetFields.Add(new HelpBox(
+                "받침의 top 배치 가능 영역은 여기서 임시 수정하지 않습니다. 영역을 바꾸려면 받침 Descriptor를 '검수할 오브젝트'로 열어 top 프레임을 수정하고 사용자 승인을 다시 받은 뒤 선택하세요.",
+                HelpBoxMessageType.Info));
 
             var subjectFrameIndex = Mathf.Max(0, Array.IndexOf(SupportedBySubjectFrames, supportedBySubjectFrameId));
             supportedBySubjectFrameField = new DropdownField("오브젝트의 접촉면", SupportedBySubjectFrameLabels, subjectFrameIndex)
@@ -286,10 +291,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private void StartCalibration() => RunSafe(() =>
         {
             if (!CanStart(out var reason)) throw new InvalidOperationException(reason);
-            var session = SpatialCalibrationSession.Begin(
-                descriptor, targetPrefab, template, wallSource, wallNormalAxis, flipWallNormal);
-            if (template == SpatialCalibrationTemplate.SupportedBy)
-                session.ConfigureSupportedByFrames(supportedBySubjectFrameId, "top");
+            var session = template == SpatialCalibrationTemplate.SupportedBy
+                ? SpatialCalibrationSession.Begin(
+                    descriptor, targetDescriptor, template, supportedBySubjectFrameId, "top")
+                : SpatialCalibrationSession.Begin(
+                    descriptor, null, template, wallSource, wallNormalAxis, flipWallNormal);
             selectedProxy = 0;
             SetStatus("정답 자세를 만들어 주세요", "Scene View에서 오브젝트를 이동·회전한 뒤 기술 검사를 실행하세요.", StatusTone.Neutral);
         });
@@ -383,9 +389,15 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 reason = "Hierarchy에서 실제 기준 벽을 선택해 주세요.";
                 return false;
             }
-            if (template == SpatialCalibrationTemplate.SupportedBy && targetPrefab == null)
+            if (template == SpatialCalibrationTemplate.SupportedBy &&
+                (targetDescriptor == null || targetDescriptor.Prefab == null))
             {
-                reason = "받침 오브젝트 프리팹을 선택해 주세요.";
+                reason = "승인된 받침 Descriptor를 선택해 주세요.";
+                return false;
+            }
+            if (template == SpatialCalibrationTemplate.SupportedBy && targetDescriptor.Geometry?.IsUsable != true)
+            {
+                reason = "받침 Descriptor의 Geometry와 top 배치 영역을 먼저 사용자 승인해 주세요.";
                 return false;
             }
             reason = null;
@@ -515,6 +527,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (session.Geometry.collisionProxies.Count == 0)
             {
                 geometryControls.Add(new Label("충돌 영역이 없습니다. 하나 이상 추가해야 기술 검사를 실행할 수 있습니다."));
+                BuildContactFrameControls(session);
                 return;
             }
             selectedProxy = Mathf.Clamp(selectedProxy, 0, session.Geometry.collisionProxies.Count - 1);
@@ -538,6 +551,51 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var rotation = new Vector3Field("회전") { value = proxy.localRotation.eulerAngles };
             rotation.RegisterValueChangedCallback(evt => { proxy.localRotation = Quaternion.Euler(evt.newValue); session.NotifyChanged(); });
             geometryControls.Add(rotation);
+            BuildContactFrameControls(session);
+        }
+
+        private void BuildContactFrameControls(SpatialCalibrationSession session)
+        {
+            var frameIds = new List<string> { "bottom", "back", "top" };
+            if (!frameIds.Contains(selectedContactFrameId)) selectedContactFrameId = "top";
+            var selector = new DropdownField("접촉 프레임", frameIds, frameIds.IndexOf(selectedContactFrameId));
+            selector.tooltip = "top은 이 에셋이 다른 물건을 받칠 때 사용할 검수 영역입니다.";
+            selector.RegisterValueChangedCallback(evt =>
+            {
+                selectedContactFrameId = evt.newValue;
+                BuildGeometryControls(session);
+                SceneView.RepaintAll();
+            });
+            geometryControls.Add(selector);
+
+            var frameId = selectedContactFrameId;
+            var contact = session.Frame(frameId);
+            var point = new Vector3Field("로컬 기준점") { value = contact.localPoint };
+            point.RegisterValueChangedCallback(evt => session.UpdateContactFrame(
+                frameId, evt.newValue, contact.localNormal, contact.localTangent, contact.size));
+            geometryControls.Add(point);
+            var normal = new Vector3Field("바깥쪽 법선") { value = contact.localNormal };
+            normal.RegisterValueChangedCallback(evt => session.UpdateContactFrame(
+                frameId, contact.localPoint, evt.newValue, contact.localTangent, contact.size));
+            geometryControls.Add(normal);
+            var tangent = new Vector3Field("가로 방향") { value = contact.localTangent };
+            tangent.RegisterValueChangedCallback(evt => session.UpdateContactFrame(
+                frameId, contact.localPoint, contact.localNormal, evt.newValue, contact.size));
+            geometryControls.Add(tangent);
+            var size = new Vector2Field("배치 가능 영역 크기") { value = contact.size };
+            size.RegisterValueChangedCallback(evt => session.UpdateContactFrame(
+                frameId, contact.localPoint, contact.localNormal, contact.localTangent, evt.newValue));
+            geometryControls.Add(size);
+
+            AddAction(geometryControls, $"{frameId} 자동 측정값으로 되돌리기", () =>
+            {
+                session.ResetContactFrame(frameId);
+                BuildGeometryControls(session);
+            });
+            if (session.Template == SpatialCalibrationTemplate.SupportedBy &&
+                string.Equals(frameId, session.SupportedBySubjectFrameId, StringComparison.OrdinalIgnoreCase))
+                AddAction(geometryControls, "수정한 접촉면으로 받침에 다시 맞추기",
+                    session.AlignSupportedBySubjectFrameToTarget);
         }
 
         private void BuildRuleControls(SpatialCalibrationSession session)
@@ -553,6 +611,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     if (selected >= 0) session.ConfigureSupportedByFrames(SupportedBySubjectFrames[selected], "top");
                 });
                 rulesControls.Add(frame);
+                var targetTop = session.TargetFrame(session.SupportedByTargetFrameId);
+                var targetRegion = new HelpBox(
+                    $"받침의 승인된 top 영역 (읽기 전용) · 기준점 {targetTop.localPoint} · 크기 {targetTop.size.x:0.###} × {targetTop.size.y:0.###}m\n" +
+                    "바꾸려면 받침 Descriptor를 검수 대상으로 열어 top 프레임을 수정하고 사용자 재승인을 받으세요.",
+                    HelpBoxMessageType.Info);
+                rulesControls.Add(targetRegion);
                 AddAction(rulesControls, "선택한 면을 받침 상단에 다시 맞추기", session.AlignSupportedBySubjectFrameToTarget);
             }
             foreach (var rule in session.Rules)
@@ -692,6 +756,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             DrawFrame(transform, session.Frame("bottom"), Color.green);
             DrawFrame(transform, session.Frame("back"), new Color(1f, 0.55f, 0.1f));
             DrawFrame(transform, session.Frame("top"), new Color(0.2f, 0.65f, 1f));
+            if (session.Template == SpatialCalibrationTemplate.SupportedBy && session.TargetObject != null)
+            {
+                DrawFrame(session.TargetObject.transform, session.TargetFrame("top"), new Color(0.9f, 0.25f, 0.9f));
+                Handles.Label(session.TargetSurface("top").Origin, "받침 top · 승인된 배치 가능 영역");
+            }
             if (session.Template is SpatialCalibrationTemplate.WallMounted or SpatialCalibrationTemplate.WallBackedFloorSupported)
                 DrawWallSurface(session.WallSurface);
         }
@@ -711,9 +780,20 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             var point = transform.TransformPoint(frame.localPoint);
             var normal = transform.TransformDirection(frame.localNormal).normalized;
+            var localTangent = Vector3.ProjectOnPlane(frame.localTangent, frame.localNormal).normalized;
+            if (localTangent.sqrMagnitude < 0.000001f) localTangent = Vector3.right;
+            var localBitangent = Vector3.Cross(localTangent, frame.localNormal.normalized).normalized;
+            var x = transform.TransformVector(localTangent * frame.size.x * 0.5f);
+            var y = transform.TransformVector(localBitangent * frame.size.y * 0.5f);
             Handles.color = color;
             Handles.DrawSolidDisc(point, SceneView.currentDrawingSceneView.camera.transform.forward, 0.025f);
             Handles.DrawLine(point, point + normal * 0.25f, 2f);
+            Handles.DrawAAPolyLine(2f,
+                point - x - y,
+                point + x - y,
+                point + x + y,
+                point - x + y,
+                point - x - y);
         }
 
         private void RunSafe(Action action)

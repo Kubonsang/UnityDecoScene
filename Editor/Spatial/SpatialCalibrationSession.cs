@@ -15,6 +15,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public string SessionId { get; } = Guid.NewGuid().ToString("N");
         public DecorAssetDescriptor Descriptor { get; }
+        public DecorAssetDescriptor TargetDescriptor { get; }
         public GameObject TargetPrefab { get; }
         public GameObject SourceWallObject { get; }
         public SpatialWallNormalAxis WallNormalAxis { get; }
@@ -23,6 +24,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string SupportedBySubjectFrameId { get; private set; }
         public string SupportedByTargetFrameId { get; private set; }
         public DecorGeometryProfile Geometry { get; }
+        public DecorGeometryProfile TargetGeometry { get; }
         public GameObject SubjectObject { get; private set; }
         public GameObject TargetObject { get; private set; }
         public GameObject FloorFixture { get; private set; }
@@ -39,6 +41,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             or SpatialCalibrationTemplate.WallBackedFloorSupported;
 
         private readonly List<SpatialContactRuleContract> rules = new();
+        private readonly DecorGeometryProfile automaticGeometry;
         private Scene calibrationScene;
         private Scene previousActiveScene;
         private SpatialCalibrationPreviewStage previewStage;
@@ -46,6 +49,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private SpatialCalibrationSession(
             DecorAssetDescriptor descriptor,
             GameObject targetPrefab,
+            DecorAssetDescriptor targetDescriptor,
             SpatialCalibrationTemplate template,
             GameObject sourceWallObject,
             SpatialWallNormalAxis wallNormalAxis,
@@ -54,7 +58,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             string supportedByTargetFrameId)
         {
             Descriptor = descriptor;
-            TargetPrefab = targetPrefab;
+            TargetDescriptor = targetDescriptor;
+            TargetPrefab = targetDescriptor != null ? targetDescriptor.Prefab : targetPrefab;
             Template = template;
             SourceWallObject = sourceWallObject;
             WallNormalAxis = wallNormalAxis;
@@ -63,6 +68,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             SupportedByTargetFrameId = NormalizeTargetFrame(supportedByTargetFrameId);
             Geometry = DecorAssetScanner.BuildGeometryProfile(descriptor.Prefab);
             Geometry.reviewed = false;
+            automaticGeometry = CloneGeometry(Geometry);
+            TargetGeometry = targetDescriptor != null
+                ? CloneGeometry(targetDescriptor.Geometry)
+                : TargetPrefab != null ? DecorAssetScanner.BuildGeometryProfile(TargetPrefab) : null;
             BuildRules();
             OpenScene();
         }
@@ -76,7 +85,17 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             SpatialCalibrationTemplate template,
             string supportedBySubjectFrameId,
             string supportedByTargetFrameId)
-            => BeginCore(descriptor, targetPrefab, template, null, SpatialWallNormalAxis.LocalForward, false,
+            => BeginCore(descriptor, targetPrefab, null, template, null, SpatialWallNormalAxis.LocalForward, false,
+                supportedBySubjectFrameId, supportedByTargetFrameId);
+
+        public static SpatialCalibrationSession Begin(
+            DecorAssetDescriptor descriptor,
+            DecorAssetDescriptor targetDescriptor,
+            SpatialCalibrationTemplate template,
+            string supportedBySubjectFrameId,
+            string supportedByTargetFrameId)
+            => BeginCore(descriptor, null, targetDescriptor, template, null,
+                SpatialWallNormalAxis.LocalForward, false,
                 supportedBySubjectFrameId, supportedByTargetFrameId);
 
         public static SpatialCalibrationSession Begin(
@@ -86,12 +105,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             GameObject sourceWallObject,
             SpatialWallNormalAxis wallNormalAxis,
             bool flipWallNormal)
-            => BeginCore(descriptor, targetPrefab, template, sourceWallObject, wallNormalAxis, flipWallNormal,
+            => BeginCore(descriptor, targetPrefab, null, template, sourceWallObject, wallNormalAxis, flipWallNormal,
                 "bottom", "top");
 
         private static SpatialCalibrationSession BeginCore(
             DecorAssetDescriptor descriptor,
             GameObject targetPrefab,
+            DecorAssetDescriptor targetDescriptor,
             SpatialCalibrationTemplate template,
             GameObject sourceWallObject,
             SpatialWallNormalAxis wallNormalAxis,
@@ -100,10 +120,15 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             string supportedByTargetFrameId)
         {
             if (descriptor == null || descriptor.Prefab == null) throw new ArgumentException("A descriptor with a prefab is required.");
-            if (template == SpatialCalibrationTemplate.SupportedBy && targetPrefab == null) throw new ArgumentException("SupportedBy requires a target prefab.");
+            if (template == SpatialCalibrationTemplate.SupportedBy && targetPrefab == null && targetDescriptor?.Prefab == null)
+                throw new ArgumentException("SupportedBy requires a target prefab or approved target descriptor.");
+            if (targetDescriptor != null && targetDescriptor.Geometry?.IsUsable != true)
+                throw new ArgumentException(
+                    "The target descriptor must contain current human-reviewed geometry.",
+                    nameof(targetDescriptor));
             Current?.Dispose();
             Current = new SpatialCalibrationSession(
-                descriptor, targetPrefab, template, sourceWallObject, wallNormalAxis, flipWallNormal,
+                descriptor, targetPrefab, targetDescriptor, template, sourceWallObject, wallNormalAxis, flipWallNormal,
                 supportedBySubjectFrameId, supportedByTargetFrameId);
             Changed?.Invoke();
             return Current;
@@ -121,19 +146,83 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         public ContactFrame Frame(string id)
         {
-            if (string.Equals(id, "bottom", StringComparison.OrdinalIgnoreCase)) return Geometry.bottomContact;
-            if (string.Equals(id, "back", StringComparison.OrdinalIgnoreCase)) return Geometry.backContact;
-            if (!string.Equals(id, "top", StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentOutOfRangeException(nameof(id), id, "Contact frame must be bottom, back, or top.");
-            var bounds = new Bounds(Descriptor.LocalBoundsCenter, Descriptor.LocalBoundsSize);
-            return new ContactFrame
+            return RequireFrame(Geometry, id, "subject");
+        }
+
+        public ContactFrame TargetFrame(string id)
+        {
+            if (TargetGeometry == null)
+                throw new InvalidOperationException("A target geometry profile is required.");
+            return RequireFrame(TargetGeometry, id, "target");
+        }
+
+        public SpatialCalibrationSurface TargetSurface(string frameId = "top")
+        {
+            if (TargetObject == null)
+                throw new InvalidOperationException("A target object is required.");
+            return SurfaceFromFrame(TargetObject.transform, TargetFrame(frameId));
+        }
+
+        public void UpdateContactFrame(
+            string frameId,
+            Vector3 localPoint,
+            Vector3 localNormal,
+            Vector3 localTangent,
+            Vector2 size)
+        {
+            var frame = Frame(frameId);
+            frame.localPoint = localPoint;
+            frame.localNormal = NormalizeOr(localNormal, DefaultNormal(frameId));
+            var projectedTangent = Vector3.ProjectOnPlane(localTangent, frame.localNormal);
+            frame.localTangent = NormalizeOr(projectedTangent, DefaultTangent(frame.localNormal));
+            frame.size = new Vector2(
+                Mathf.Max(0.001f, Mathf.Abs(size.x)),
+                Mathf.Max(0.001f, Mathf.Abs(size.y)));
+            NotifyChanged();
+        }
+
+        public void ResetContactFrame(string frameId)
+        {
+            CopyFrame(RequireFrame(automaticGeometry, frameId, "automatic"), Frame(frameId));
+            NotifyChanged();
+        }
+
+        /// <summary>
+        /// Builds a session-only target support frame on the face opposite a reviewed contact
+        /// frame. This is used when an asset such as a book is rotated onto its reviewed back:
+        /// the opposite face becomes the world-up stacking region. The target descriptor and its
+        /// approved geometry are never mutated.
+        /// </summary>
+        public void ConfigureTargetOppositeFrame(string sourceFrameId, string targetFrameId = "top")
+        {
+            if (Template != SpatialCalibrationTemplate.SupportedBy || TargetGeometry == null)
+                throw new InvalidOperationException("A SupportedBy target geometry profile is required.");
+            NormalizeTargetFrame(targetFrameId);
+            var source = TargetFrame(sourceFrameId);
+            var sourceNormal = NormalizeOr(source.localNormal, DefaultNormal(sourceFrameId));
+            var oppositeNormal = -sourceNormal;
+            var tangent = NormalizeOr(
+                Vector3.ProjectOnPlane(source.localTangent, oppositeNormal),
+                DefaultTangent(oppositeNormal));
+            var maximumProjection = TargetGeometry.collisionProxies
+                .Where(proxy => proxy != null)
+                .SelectMany(ProxyCorners)
+                .Select(point => Vector3.Dot(point, oppositeNormal))
+                .DefaultIfEmpty(Vector3.Dot(source.localPoint, oppositeNormal))
+                .Max();
+            var sourceProjection = Vector3.Dot(source.localPoint, oppositeNormal);
+            TargetGeometry.topContact = new ContactFrame
             {
                 frameId = "top",
-                localPoint = new Vector3(bounds.center.x, bounds.max.y, bounds.center.z),
-                localNormal = Vector3.up,
-                localTangent = Vector3.right,
-                size = new Vector2(bounds.size.x, bounds.size.z)
+                localPoint = source.localPoint + oppositeNormal * (maximumProjection - sourceProjection),
+                localNormal = oppositeNormal,
+                localTangent = tangent,
+                size = new Vector2(
+                    Mathf.Max(0.001f, Mathf.Abs(source.size.x)),
+                    Mathf.Max(0.001f, Mathf.Abs(source.size.y)))
             };
+            SupportedByTargetFrameId = "top";
+            NotifyChanged();
         }
 
         public void ConfigureSupportedByFrames(string subjectFrameId, string targetFrameId)
@@ -276,20 +365,102 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (Template != SpatialCalibrationTemplate.SupportedBy || SubjectObject == null || TargetObject == null)
                 throw new InvalidOperationException("SupportedBy subject and target objects are required before alignment.");
             var frame = Frame(SupportedBySubjectFrameId);
-            var targetBounds = TargetWorldBounds();
-            var targetNormal = Vector3.up;
-            var targetTangent = Vector3.right;
+            var targetSurface = TargetSurface(SupportedByTargetFrameId);
+            var targetNormal = targetSurface.Normal;
+            var targetTangent = targetSurface.Tangent;
             var normalAlignment = Quaternion.FromToRotation(frame.localNormal.normalized, -targetNormal);
             var tangentAfterNormal = Vector3.ProjectOnPlane(normalAlignment * frame.localTangent, targetNormal).normalized;
             var tangentAlignment = tangentAfterNormal.sqrMagnitude > 0.000001f
-                ? Quaternion.FromToRotation(tangentAfterNormal, targetTangent)
+                ? Quaternion.AngleAxis(
+                    Vector3.SignedAngle(tangentAfterNormal, targetTangent, targetNormal),
+                    targetNormal)
                 : Quaternion.identity;
             var rotation = tangentAlignment * normalAlignment;
             SubjectObject.transform.SetPositionAndRotation(Vector3.zero, rotation);
-            var targetPoint = new Vector3(targetBounds.center.x, targetBounds.max.y, targetBounds.center.z);
-            SubjectObject.transform.position = targetPoint - SubjectObject.transform.TransformVector(frame.localPoint);
+            SubjectObject.transform.position = targetSurface.Origin
+                                               - SubjectObject.transform.TransformVector(frame.localPoint);
             if (notify) NotifyChanged();
         }
+
+        private static SpatialCalibrationSurface SurfaceFromFrame(Transform transform, ContactFrame frame)
+        {
+            var normal = NormalizeOr(transform.TransformDirection(frame.localNormal), Vector3.up);
+            var tangent = Vector3.ProjectOnPlane(transform.TransformDirection(frame.localTangent), normal);
+            tangent = NormalizeOr(tangent, DefaultTangent(normal));
+
+            var localNormal = NormalizeOr(frame.localNormal, Vector3.up);
+            var localTangent = NormalizeOr(
+                Vector3.ProjectOnPlane(frame.localTangent, localNormal),
+                DefaultTangent(localNormal));
+            var localBitangent = Vector3.Cross(localTangent, localNormal).normalized;
+            var bitangent = Vector3.ProjectOnPlane(transform.TransformDirection(localBitangent), normal);
+            bitangent = NormalizeOr(bitangent, Vector3.Cross(tangent, normal));
+
+            var width = transform.TransformVector(localTangent * frame.size.x).magnitude;
+            var height = transform.TransformVector(localBitangent * frame.size.y).magnitude;
+            return new SpatialCalibrationSurface(
+                transform.TransformPoint(frame.localPoint),
+                normal,
+                tangent,
+                bitangent,
+                new Vector2(Mathf.Max(0.001f, width), Mathf.Max(0.001f, height)));
+        }
+
+        private static ContactFrame RequireFrame(DecorGeometryProfile geometry, string id, string owner)
+        {
+            var frame = geometry?.Frame(id);
+            if (frame == null)
+                throw new ArgumentOutOfRangeException(nameof(id), id,
+                    $"The {owner} contact frame must be bottom, back, or top.");
+            return frame;
+        }
+
+        private static DecorGeometryProfile CloneGeometry(DecorGeometryProfile source)
+        {
+            if (source == null) return null;
+            var clone = JsonUtility.FromJson<DecorGeometryProfile>(JsonUtility.ToJson(source));
+            clone.Normalize();
+            return clone;
+        }
+
+        private static void CopyFrame(ContactFrame source, ContactFrame destination)
+        {
+            destination.frameId = source.frameId;
+            destination.localPoint = source.localPoint;
+            destination.localNormal = source.localNormal;
+            destination.localTangent = source.localTangent;
+            destination.size = source.size;
+        }
+
+        private static IEnumerable<Vector3> ProxyCorners(OrientedBoxProxy proxy)
+        {
+            var extents = new Vector3(
+                Mathf.Abs(proxy.size.x),
+                Mathf.Abs(proxy.size.y),
+                Mathf.Abs(proxy.size.z)) * 0.5f;
+            for (var x = -1; x <= 1; x += 2)
+            for (var y = -1; y <= 1; y += 2)
+            for (var z = -1; z <= 1; z += 2)
+                yield return proxy.localCenter + proxy.localRotation * new Vector3(
+                    extents.x * x,
+                    extents.y * y,
+                    extents.z * z);
+        }
+
+        private static Vector3 DefaultNormal(string frameId) =>
+            string.Equals(frameId, "bottom", StringComparison.OrdinalIgnoreCase) ? Vector3.down :
+            string.Equals(frameId, "back", StringComparison.OrdinalIgnoreCase) ? Vector3.back : Vector3.up;
+
+        private static Vector3 DefaultTangent(Vector3 normal)
+        {
+            var tangent = Vector3.ProjectOnPlane(Vector3.right, normal);
+            if (tangent.sqrMagnitude < 0.000001f)
+                tangent = Vector3.ProjectOnPlane(Vector3.forward, normal);
+            return tangent.normalized;
+        }
+
+        private static Vector3 NormalizeOr(Vector3 value, Vector3 fallback) =>
+            value.sqrMagnitude < 0.000001f ? fallback.normalized : value.normalized;
 
         private static string NormalizeSubjectFrame(string value)
         {
