@@ -105,6 +105,59 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void PresetsChangeRotationCharacterWithoutBreakingHardGates()
+        {
+            var neat = CreateArrangementFixture();
+            neat.Spec.ApplyPreset(SurfaceArrangementPreset.Neat);
+            var scattered = CreateArrangementFixture();
+            scattered.Spec.ApplyPreset(SurfaceArrangementPreset.Scattered);
+
+            var neatResult = Pack(neat);
+            var scatteredResult = Pack(scattered);
+
+            Assert.That(neatResult.AssetGaps.gaps, Is.Empty, DescribeGaps(neatResult));
+            Assert.That(scatteredResult.AssetGaps.gaps, Is.Empty, DescribeGaps(scatteredResult));
+            Assert.That(AverageBookHeadingDeviation(scatteredResult),
+                Is.GreaterThan(AverageBookHeadingDeviation(neatResult) + 5f),
+                "Scattered should visibly vary book headings more than Neat while using the same approved poses.");
+        }
+
+        [Test]
+        public void TwelveItemArrangementMeetsInteractivePerformanceTarget()
+        {
+            var fixture = CreateArrangementFixture(new Vector2(6f, 6f));
+            foreach (var member in fixture.Spec.members)
+            {
+                member.minimum_count = 4;
+                member.maximum_count = 4;
+            }
+            fixture.Spec.amount = 1f;
+
+            Pack(fixture);
+            Pack(fixture); // Warm managed code and Unity math before measuring the resolver itself.
+            var samples = new List<double>(7);
+            for (var sample = 0; sample < 7; sample++)
+            {
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var result = Pack(fixture);
+                stopwatch.Stop();
+                Assert.That(result.AssetGaps.gaps, Is.Empty, DescribeGaps(result));
+                Assert.That(ArrangementPlacements(result), Has.Length.EqualTo(12));
+                samples.Add(stopwatch.Elapsed.TotalMilliseconds);
+            }
+            samples.Sort();
+            var minimum = samples[0];
+            var median = samples[samples.Count / 2];
+            Assert.Multiple(() =>
+            {
+                Assert.That(median, Is.LessThan(100d),
+                    $"12-item arrangement median was {median:F2}ms (min {minimum:F2}ms; samples {string.Join(", ", samples.Select(value => value.ToString("F2")))}). ");
+                Assert.That(minimum, Is.LessThan(100d),
+                    $"No post-warmup 12-item sample met the 100ms target; min was {minimum:F2}ms.");
+            });
+        }
+
+        [Test]
         public void SmallSupportReportsExactNoFitCodeInsteadOfFallingBack()
         {
             var fixture = CreateArrangementFixture(new Vector2(0.45f, 0.45f));
@@ -332,6 +385,18 @@ namespace UnityDecoScene.DungeonDecorator.Tests
 
         private static string DescribeGaps(LayoutResult result) => string.Join(" | ",
             result.AssetGaps.gaps.Select(value => $"{value.code}: {value.reason}"));
+
+        private static float AverageBookHeadingDeviation(LayoutResult result)
+        {
+            var headings = ArrangementPlacements(result)
+                .Where(value => value.descriptor.AssetId.StartsWith("book-", StringComparison.Ordinal))
+                .Select(value => Mathf.Abs(Vector3.SignedAngle(
+                    Vector3.right,
+                    Vector3.ProjectOnPlane(value.rotation * Vector3.right, Vector3.up).normalized,
+                    Vector3.up)))
+                .ToArray();
+            return headings.Length == 0 ? 0f : headings.Average();
+        }
 
         private static PlacedDecorItem CloneLocked(PlacedDecorItem source) => new()
         {
