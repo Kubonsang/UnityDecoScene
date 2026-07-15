@@ -177,7 +177,7 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             Assert.That(template, Does.Contain("data-reviewed"));
             Assert.That(template, Does.Contain("체크만으로 승인되지 않습니다"));
             Assert.That(template, Does.Contain("수정 필요 선택 시 필수"));
-            Assert.That(template, Does.Contain("수정 필요 사유를 먼저 적어주세요."));
+            Assert.That(template, Does.Contain("수정할 문제를 선택하거나 이유를 적어주세요."));
             Assert.That(template, Does.Contain("승인 예정"));
             Assert.That(template, Does.Contain("수정 필요"));
             Assert.That(template, Does.Contain("미판정"));
