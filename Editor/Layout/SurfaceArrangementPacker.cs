@@ -285,15 +285,15 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 var localBitangent = Vector3.Cross(frame.localNormal.normalized, localTangent).normalized;
                 var tangentVector = placement.rotation * Vector3.Scale(localTangent * frame.size.x, placement.scale);
                 var bitangentVector = placement.rotation * Vector3.Scale(localBitangent * frame.size.y, placement.scale);
-                var tangent = Vector3.ProjectOnPlane(tangentVector, normal).normalized;
-                var bitangent = Vector3.ProjectOnPlane(bitangentVector, normal).normalized;
-                if (tangent.sqrMagnitude < 0.9f || bitangent.sqrMagnitude < 0.9f) return false;
+                var frameTangent = Vector3.ProjectOnPlane(tangentVector, normal).normalized;
+                var frameBitangent = Vector3.ProjectOnPlane(bitangentVector, normal).normalized;
+                if (frameTangent.sqrMagnitude < 0.9f || frameBitangent.sqrMagnitude < 0.9f) return false;
                 surface = new SupportSurface(
                     frameId,
                     placement.position + placement.rotation * Vector3.Scale(frame.localPoint, placement.scale),
                     normal,
-                    tangent,
-                    bitangent,
+                    frameTangent,
+                    frameBitangent,
                     new Vector2(tangentVector.magnitude, bitangentVector.magnitude));
                 return surface.Size.x > 0.001f && surface.Size.y > 0.001f;
             }
