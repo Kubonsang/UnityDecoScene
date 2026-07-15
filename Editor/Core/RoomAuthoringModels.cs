@@ -148,12 +148,18 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public RoomCompositionPlan Plan { get; }
         public IReadOnlyList<PlacedDecorItem> LockedPlacements { get; }
         public RoomAuthoringContext AuthoringContext { get; }
+        public SupportContractCatalog SupportContracts { get; }
 
-        public LayoutRequest(RoomCompositionPlan plan, IReadOnlyList<PlacedDecorItem> lockedPlacements = null, RoomAuthoringContext authoringContext = null)
+        public LayoutRequest(
+            RoomCompositionPlan plan,
+            IReadOnlyList<PlacedDecorItem> lockedPlacements = null,
+            RoomAuthoringContext authoringContext = null,
+            SupportContractCatalog supportContracts = null)
         {
             Plan = plan ?? throw new ArgumentNullException(nameof(plan));
             LockedPlacements = lockedPlacements;
             AuthoringContext = authoringContext;
+            SupportContracts = supportContracts;
         }
     }
 

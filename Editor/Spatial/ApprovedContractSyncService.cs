@@ -182,7 +182,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             if (left == null || right == null || !left.reviewed || !string.Equals(left.dependencyHash, right.dependencyHash, StringComparison.Ordinal)) return false;
             if (!Near(left.forwardAxis, right.forwardAxis) || !Near(left.upAxis, right.upAxis) || !Near(left.pivotOffset, right.pivotOffset)) return false;
-            if (!Frame(left.bottomContact, right.bottomContact) || !Frame(left.backContact, right.backContact)) return false;
+            if (!Frame(left.bottomContact, right.bottomContact) ||
+                !Frame(left.backContact, right.backContact) ||
+                !Frame(left.topContact, right.topContact)) return false;
             var leftBoxes = left.collisionProxies ?? new List<OrientedBoxProxy>();
             var rightBoxes = right.collisionProxies ?? new List<OrientedBoxProxy>();
             if (leftBoxes.Count != rightBoxes.Count) return false;

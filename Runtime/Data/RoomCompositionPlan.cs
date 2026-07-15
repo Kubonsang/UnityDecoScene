@@ -28,6 +28,7 @@ namespace UnityDecoScene.DungeonDecorator
         [SerializeField] private int seed = 12345;
         [Range(0f, 1f)] [SerializeField] private float density = 0.5f;
         [SerializeField] private List<CompositionElement> elements = new();
+        [SerializeField] private List<SurfaceArrangementSpec> surfaceArrangements = new();
 
         public ConceptRoom Room => room;
         public RoomConceptBrief ConceptBrief => conceptBrief;
@@ -35,8 +36,21 @@ namespace UnityDecoScene.DungeonDecorator
         public int Seed => seed;
         public float Density => density;
         public IReadOnlyList<CompositionElement> Elements => elements;
+        public IReadOnlyList<SurfaceArrangementSpec> SurfaceArrangements => surfaceArrangements ?? (IReadOnlyList<SurfaceArrangementSpec>)Array.Empty<SurfaceArrangementSpec>();
 
         public void Configure(ConceptRoom targetRoom, RoomConceptBrief brief, DecorCatalog sourceCatalog, int randomSeed, float targetDensity, IEnumerable<CompositionElement> sourceElements)
+        {
+            Configure(targetRoom, brief, sourceCatalog, randomSeed, targetDensity, sourceElements, Array.Empty<SurfaceArrangementSpec>());
+        }
+
+        public void Configure(
+            ConceptRoom targetRoom,
+            RoomConceptBrief brief,
+            DecorCatalog sourceCatalog,
+            int randomSeed,
+            float targetDensity,
+            IEnumerable<CompositionElement> sourceElements,
+            IEnumerable<SurfaceArrangementSpec> arrangements)
         {
             room = targetRoom;
             conceptBrief = brief;
@@ -44,6 +58,7 @@ namespace UnityDecoScene.DungeonDecorator
             seed = randomSeed;
             density = Mathf.Clamp01(targetDensity);
             elements = new List<CompositionElement>(sourceElements ?? Array.Empty<CompositionElement>());
+            surfaceArrangements = new List<SurfaceArrangementSpec>(arrangements ?? Array.Empty<SurfaceArrangementSpec>());
         }
     }
 }

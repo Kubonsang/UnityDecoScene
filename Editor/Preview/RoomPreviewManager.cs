@@ -38,7 +38,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 : preserveLocks && Current != null
                     ? Current.Placements.Where(item => item.locked).Select(CloneForRegeneration).ToArray()
                     : Array.Empty<PlacedDecorItem>();
-            var effectiveRequest = new LayoutRequest(plan, locked, request.AuthoringContext);
+            var effectiveRequest = new LayoutRequest(plan, locked, request.AuthoringContext, request.SupportContracts);
 
             DiscardPreview(false, plan);
             var layout = DeterministicLayoutEngine.Generate(effectiveRequest);
@@ -60,7 +60,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 Root = root,
                 AssetGaps = layout.AssetGaps,
                 ManifestHash = ComputeManifestHash(plan.Room),
-                GeometryProfileHash = ComputeGeometryHash(plan),
+                GeometryProfileHash = ComputeGeometryHash(plan, effectiveRequest.SupportContracts),
                 AuthoringSourceHash = effectiveRequest.AuthoringContext?.sourceHash ?? string.Empty,
                 ObstacleGeometryHash = effectiveRequest.AuthoringContext?.ComputeObstacleHash() ?? string.Empty
             };
@@ -277,6 +277,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             contactEvidence = source.contactEvidence,
             surfaceIds = source.surfaceIds != null ? new List<string>(source.surfaceIds) : new List<string>(),
             contactEvidenceSet = source.contactEvidenceSet != null ? new List<ContactEvidence>(source.contactEvidenceSet) : new List<ContactEvidence>(),
+            arrangementId = source.arrangementId,
+            affinityGroup = source.affinityGroup,
+            supportPlacementId = source.supportPlacementId,
+            stackLevel = source.stackLevel,
             locked = true
         };
 
@@ -288,7 +292,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return Hash128.Compute(text.ToString()).ToString();
         }
 
-        private static string ComputeGeometryHash(RoomCompositionPlan plan)
+        private static string ComputeGeometryHash(RoomCompositionPlan plan, SupportContractCatalog supportContracts)
         {
             var text = new StringBuilder();
             foreach (var descriptor in plan.Catalog.Assets.Where(value => value?.Geometry != null).OrderBy(value => value.AssetId, StringComparer.Ordinal))
@@ -300,6 +304,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                         .Append('/').Append(rules.maximumGap.ToString("R", CultureInfo.InvariantCulture));
                 text.Append('|');
             }
+            foreach (var arrangement in plan.SurfaceArrangements.Where(value => value != null)
+                         .OrderBy(value => value.arrangement_id ?? string.Empty, StringComparer.Ordinal))
+                text.Append("arrangement:").Append(SurfaceArrangementSpecUtility.ComputeSpecHash(arrangement)).Append('|');
+            if (supportContracts != null) text.Append("support-contracts:").Append(supportContracts.ComputeHash()).Append('|');
             return Hash128.Compute(text.ToString()).ToString();
         }
 

@@ -64,6 +64,8 @@ namespace UnityDecoScene.DungeonDecorator
     [Serializable]
     public sealed class AssetGap
     {
+        public string code;
+        public string targetId;
         public DecorRole role;
         public string styleSet;
         public string reason;

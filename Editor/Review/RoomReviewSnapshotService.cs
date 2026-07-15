@@ -143,6 +143,17 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     F(element.spacing),
                     element.locked ? "1" : "0")));
             }
+            foreach (var arrangement in plan.SurfaceArrangements.Where(value => value != null)
+                         .OrderBy(value => value.arrangement_id, StringComparer.Ordinal))
+            {
+                result.Add(Item($"arrangement:{arrangement.arrangement_id}", RoomReviewChangeScope.Composition,
+                    RoomReviewHashUtility.Sha256(SurfaceArrangementSpecUtility.CanonicalJson(arrangement))));
+            }
+            if (session.Request?.SupportContracts != null)
+            {
+                result.Add(Item("arrangement:support-contracts", RoomReviewChangeScope.Composition,
+                    RoomReviewHashUtility.Sha256(session.Request.SupportContracts.ComputeHash())));
+            }
             return result;
         }
 
@@ -150,6 +161,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             var requested = new HashSet<string>(session.Plan.Elements.Where(value => value != null)
                 .Select(value => value.descriptorId).Where(value => !string.IsNullOrWhiteSpace(value)), StringComparer.Ordinal);
+            foreach (var descriptorId in session.Plan.SurfaceArrangements.Where(value => value?.members != null)
+                         .SelectMany(value => value.members)
+                         .Where(value => value != null && !string.IsNullOrWhiteSpace(value.descriptor_id))
+                         .Select(value => value.descriptor_id)) requested.Add(descriptorId);
             foreach (var placement in session.Placements.Where(value => value?.descriptor != null)) requested.Add(placement.descriptor.AssetId);
             var result = new List<RoomReviewInputItem>();
             foreach (var id in requested.OrderBy(value => value, StringComparer.Ordinal))
@@ -205,6 +220,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 V(value.scale),
                 string.Join(",", (value.surfaceIds ?? new List<string>()).OrderBy(id => id, StringComparer.Ordinal)),
                 value.surfaceId ?? string.Empty,
+                value.arrangementId ?? string.Empty,
+                value.affinityGroup ?? string.Empty,
+                value.supportPlacementId ?? string.Empty,
+                value.stackLevel.ToString(CultureInfo.InvariantCulture),
                 value.locked ? "1" : "0")))
             .ToList();
 
@@ -284,7 +303,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 "forward:" + V(geometry.forwardAxis), "up:" + V(geometry.upAxis), "pivot:" + V(geometry.pivotOffset),
                 "confidence:" + F(geometry.inferenceConfidence), "geometry-reviewed:" + (geometry.reviewed ? "1" : "0"),
                 "geometry-dependency:" + (geometry.dependencyHash ?? string.Empty),
-                "bottom-frame:" + Frame(geometry.bottomContact), "back-frame:" + Frame(geometry.backContact)
+                "bottom-frame:" + Frame(geometry.bottomContact), "back-frame:" + Frame(geometry.backContact),
+                "top-frame:" + Frame(geometry.topContact)
             });
             parts.AddRange((geometry.collisionProxies ?? new List<OrientedBoxProxy>()).Where(value => value != null)
                 .Select(value => "proxy:" + string.Join("|", value.proxyId ?? string.Empty, V(value.localCenter), V(value.size), Q(value.localRotation)))

@@ -21,6 +21,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public ContactEvidence contactEvidence;
         public List<string> surfaceIds = new();
         public List<ContactEvidence> contactEvidenceSet = new();
+        public string arrangementId;
+        public string affinityGroup;
+        public string supportPlacementId;
+        public int stackLevel;
         public bool locked;
         [NonSerialized] public GameObject previewObject;
     }

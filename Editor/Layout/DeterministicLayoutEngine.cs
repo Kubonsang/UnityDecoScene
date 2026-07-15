@@ -82,6 +82,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 }
             }
 
+            SurfaceArrangementPacker.Append(request, result);
+
             return result;
         }
 
@@ -468,6 +470,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             contactEvidence = source.contactEvidence,
             surfaceIds = source.surfaceIds != null ? new List<string>(source.surfaceIds) : new List<string>(),
             contactEvidenceSet = source.contactEvidenceSet != null ? new List<ContactEvidence>(source.contactEvidenceSet) : new List<ContactEvidence>(),
+            arrangementId = source.arrangementId,
+            affinityGroup = source.affinityGroup,
+            supportPlacementId = source.supportPlacementId,
+            stackLevel = source.stackLevel,
             locked = source.locked
         };
 

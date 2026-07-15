@@ -42,9 +42,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 QuantizedVector.From(profile.pivotOffset).Write(writer);
                 WriteFrame(writer, profile.bottomContact);
                 WriteFrame(writer, profile.backContact);
+                WriteFrame(writer, profile.topContact);
             }
             using var sha = SHA256.Create();
-            return "proxy-v1:" + string.Concat(sha.ComputeHash(stream.ToArray()).Select(value => value.ToString("x2")));
+            return "proxy-v2:" + string.Concat(sha.ComputeHash(stream.ToArray()).Select(value => value.ToString("x2")));
         }
 
         private static void WriteFrame(BinaryWriter writer, ContactFrame frame)

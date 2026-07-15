@@ -9,7 +9,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 {
     public static class PreviewValidationService
     {
-        public const string ValidationVersion = "room-validator-3-authoring-obstacles";
+        public const string ValidationVersion = "room-validator-4-surface-arrangement";
 
         public static ValidationReport Validate(PreviewSession session)
         {
@@ -67,11 +67,18 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     var other = session.Placements[j];
                     if (other == null || other.descriptor == null) continue;
                     if (item.descriptor.Geometry == null || other.descriptor.Geometry == null) continue;
-                    var padding = Mathf.Max(item.descriptor.Clearance, other.descriptor.Clearance);
+                    var arrangementPair = !string.IsNullOrWhiteSpace(item.arrangementId) ||
+                                          !string.IsNullOrWhiteSpace(other.arrangementId);
+                    var padding = arrangementPair ? 0f : Mathf.Max(item.descriptor.Clearance, other.descriptor.Clearance);
                     var left = SpatialGeometryUtility.BuildWorldObbs(item.descriptor, item.position, item.rotation, item.scale, padding);
                     var right = SpatialGeometryUtility.BuildWorldObbs(other.descriptor, other.position, other.rotation, other.scale, padding);
                     if (SpatialGeometryUtility.Intersects(left, right))
-                        report.issues.Add(new ValidationIssue("OBB_OVERLAP", ValidationSeverity.Error, $"{item.descriptor.name} overlaps {other.descriptor.name}.", item.placementId, other.placementId));
+                        report.issues.Add(new ValidationIssue(
+                            arrangementPair ? SurfaceArrangementErrorCodes.Overlap : "OBB_OVERLAP",
+                            ValidationSeverity.Error,
+                            $"{item.descriptor.name} overlaps {other.descriptor.name}.",
+                            item.placementId,
+                            other.placementId));
                 }
             }
 
@@ -84,7 +91,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             if (session.AssetGaps != null)
             {
                 foreach (var gap in session.AssetGaps.gaps)
-                    report.issues.Add(new ValidationIssue("ASSET_GAP", ValidationSeverity.Error, $"{gap.role}: {gap.reason}"));
+                    report.issues.Add(new ValidationIssue(
+                        string.IsNullOrWhiteSpace(gap.code) ? "ASSET_GAP" : gap.code,
+                        ValidationSeverity.Error,
+                        $"{gap.role}: {gap.reason}",
+                        gap.targetId));
             }
 
             session.LastValidation = FinalizeReport(report, session);
@@ -180,6 +191,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static void ValidateContact(PreviewSession session, ConceptRoom room, PlacedDecorItem item, ValidationReport report)
         {
+            if (!string.IsNullOrWhiteSpace(item.arrangementId))
+            {
+                ValidateArrangementContact(session, item, report);
+                return;
+            }
             var profile = item.descriptor.Geometry;
             if (profile == null) return;
             var rules = profile.EffectiveContacts
@@ -228,6 +244,30 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 if (evidence.directionAlignment < 0.95f)
                     report.issues.Add(new ValidationIssue("CONTACT_DIRECTION", ValidationSeverity.Error, $"{item.descriptor.name} {rule.requirement} face does not oppose '{surface.SurfaceId}'.", item.placementId));
             }
+        }
+
+        private static void ValidateArrangementContact(PreviewSession session, PlacedDecorItem item, ValidationReport report)
+        {
+            var spec = session.Plan?.SurfaceArrangements?.FirstOrDefault(value => value != null &&
+                string.Equals(value.arrangement_id, item.arrangementId, StringComparison.Ordinal));
+            var support = session.Placements.FirstOrDefault(value => value != null &&
+                string.Equals(value.placementId, item.supportPlacementId, StringComparison.Ordinal));
+            var code = SurfaceArrangementPacker.ValidatePlacement(session.Request, spec, item, support, out var evidence);
+            item.contactEvidence = evidence;
+            item.contactEvidenceSet ??= new List<ContactEvidence>();
+            item.contactEvidenceSet.Clear();
+            item.contactEvidenceSet.Add(evidence);
+            item.surfaceId = evidence.surfaceId;
+            item.surfaceIds ??= new List<string>();
+            item.surfaceIds.Clear();
+            if (!string.IsNullOrWhiteSpace(evidence.surfaceId)) item.surfaceIds.Add(evidence.surfaceId);
+            if (string.IsNullOrWhiteSpace(code)) return;
+            report.issues.Add(new ValidationIssue(
+                code,
+                ValidationSeverity.Error,
+                $"{item.descriptor.name} does not satisfy arrangement '{item.arrangementId}' support rules.",
+                item.placementId,
+                support?.placementId));
         }
 
         private static void ValidateStyle(IEnumerable<PlacedDecorItem> placements, ValidationReport report)
