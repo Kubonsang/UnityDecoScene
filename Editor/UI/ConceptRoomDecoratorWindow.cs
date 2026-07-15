@@ -386,22 +386,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static bool DetectUnityCtx()
         {
-            try
-            {
-                var configured = Environment.GetEnvironmentVariable("UNITY_CTX_BIN");
-                if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured)) return true;
-                using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "where.exe",
-                    Arguments = "unity-ctx",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                });
-                return process != null && process.WaitForExit(1500) && process.ExitCode == 0;
-            }
-            catch { return false; }
+            return !string.IsNullOrWhiteSpace(SpatialCalibrationWorkflow.ResolveUnityCtxBinary());
         }
     }
 }

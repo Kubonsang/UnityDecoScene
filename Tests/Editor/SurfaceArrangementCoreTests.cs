@@ -28,6 +28,50 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void SpecHashMatchesUnityCtxUnicodeAndFloatBoundaryGolden()
+        {
+            var spec = new SurfaceArrangementSpec
+            {
+                arrangement_id = "arrangement-" + new string('x', 140) + "-한글<&>",
+                target_element_id = "table<&>",
+                target_frame_id = "top-면",
+                members = new List<SurfaceArrangementMemberSpec>
+                {
+                    new()
+                    {
+                        descriptor_id = "book-\uE000",
+                        minimum_count = 1,
+                        maximum_count = 1,
+                        selection_weight = 1f,
+                        affinity_group = "책<&>"
+                    },
+                    new()
+                    {
+                        descriptor_id = "book-\U00010000",
+                        minimum_count = 1,
+                        maximum_count = 1,
+                        selection_weight = 0.5500005f,
+                        affinity_group = "책<&>"
+                    }
+                },
+                preset = nameof(SurfaceArrangementPreset.InUse),
+                amount = 0.5500005f,
+                orderliness = 0.45f,
+                grouping = 0.75f,
+                stacking = 0.55f,
+                edge_margin = 101.25f,
+                max_stack_height = 3,
+                seed_offset = 17,
+                resolver_version = SurfaceArrangementSpec.CurrentResolverVersion
+            };
+
+            const string expected = "d47aa81e6f6bcd2568fc372662c1f91b2e20f66391b87449009912d0369f398e";
+            Assert.That(SurfaceArrangementSpecUtility.ComputeSpecHash(spec), Is.EqualTo(expected));
+            spec.spec_hash = expected;
+            Assert.That(SurfaceArrangementSpecUtility.Validate(spec, out var reason), Is.True, reason);
+        }
+
+        [Test]
         public void ValidationRejectsDuplicateDescriptorAndEmptyAffinity()
         {
             var spec = ArchiveSpec();
@@ -51,8 +95,9 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             catalog.RegisterAsset(new SupportAssetIdentity("book-red", aliasGuid, "red-geometry", "red-geometry", "book-family"));
             catalog.RegisterAsset(new SupportAssetIdentity("table", targetGuid, "table-geometry", "table-geometry", "table-family"));
             var document = ApprovedInteraction(subjectGuid, targetGuid);
-            Assert.That(catalog.RegisterApprovedInteraction(new SupportInteractionBinding(
-                document, "book", "table", "book-geometry", "table-geometry"), out var registerReason), Is.True, registerReason);
+            Assert.That(catalog.RegisterApprovedInteraction(SupportInteractionBinding.FromAuthorityVerifiedSnapshot(
+                document, "book", "table", "book-geometry", "table-geometry",
+                SpatialContractHashUtility.ComputeContentHash(document)), out var registerReason), Is.True, registerReason);
             Assert.That(catalog.TryResolve("book-red", "table", out var resolved, out var code), Is.True, code);
             Assert.That(resolved.SubjectUsesGeometryFamilyAlias, Is.True);
 
@@ -333,8 +378,9 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             string subjectGeometryHash,
             string targetGeometryHash)
         {
-            Assert.That(catalog.RegisterApprovedInteraction(new SupportInteractionBinding(
-                document, subjectId, targetId, subjectGeometryHash, targetGeometryHash), out var reason), Is.True, reason);
+            Assert.That(catalog.RegisterApprovedInteraction(SupportInteractionBinding.FromAuthorityVerifiedSnapshot(
+                document, subjectId, targetId, subjectGeometryHash, targetGeometryHash,
+                SpatialContractHashUtility.ComputeContentHash(document)), out var reason), Is.True, reason);
         }
 
         private DecorAssetDescriptor CreateDescriptor(string id, Bounds bounds, DecorRole role)

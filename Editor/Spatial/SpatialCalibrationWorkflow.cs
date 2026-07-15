@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using UnityEditor;
@@ -22,6 +23,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public const string AgentBriefRelativePath = "Library/DungeonDecorator/CalibrationWorkflow/agent-brief.json";
         private const string ReviewTemplatePath = "Packages/com.unitydecoscene.dungeon-decorator/Editor/Spatial/Templates/CalibrationReviewTemplate.html";
         private const string UnityCtxPreferenceKey = "DungeonDecorator.FastCalibration.UnityCtxPath";
+        private const string NodePreferenceKey = "DungeonDecorator.FastCalibration.NodePath";
         private const double PollInterval = 0.5d;
 
         private static readonly Dictionary<string, SpatialCalibrationTemplate> ApprovedRelationDefaults =
@@ -36,7 +38,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             };
 
         private static double nextPoll;
+        private static double reviewOpenDeadline;
         private static bool running;
+        private static bool reviewOpenPending;
         private static Process reviewBridge;
 
         public static event Action Changed;
@@ -70,8 +74,32 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [MenuItem("Tools/Concept Room Decorator/Fast Calibration/Configure unity-ctx")]
         public static void ConfigureUnityCtx()
         {
-            var selected = EditorUtility.OpenFilePanel("Select unity-ctx executable", ProjectRoot(), "exe");
-            if (!string.IsNullOrWhiteSpace(selected)) EditorPrefs.SetString(UnityCtxPreferenceKey, selected);
+            var selected = EditorUtility.OpenFilePanel("Select trusted unity-ctx executable", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "exe");
+            if (string.IsNullOrWhiteSpace(selected)) return;
+            var fullPath = ResolveTrustedExecutablePath(selected);
+            if (string.IsNullOrWhiteSpace(fullPath))
+            {
+                EditorUtility.DisplayDialog("unity-ctx 설정", "승인 검증용 unity-ctx는 현재 Unity 프로젝트 밖에 설치된 실행 파일이어야 합니다.", "확인");
+                return;
+            }
+            EditorPrefs.SetString(UnityCtxPreferenceKey, fullPath);
+        }
+
+        [MenuItem("Tools/Concept Room Decorator/Fast Calibration/Configure Node.js")]
+        public static void ConfigureNode()
+        {
+            var selected = EditorUtility.OpenFilePanel("Select trusted Node.js executable", Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "exe");
+            if (string.IsNullOrWhiteSpace(selected)) return;
+            var fullPath = ResolveTrustedExecutablePath(selected);
+            if (string.IsNullOrWhiteSpace(fullPath))
+            {
+                EditorUtility.DisplayDialog(
+                    "Node.js 설정",
+                    "검수 브리지용 Node.js는 현재 Unity 프로젝트 밖의 실제 실행 파일이어야 하며, 심볼릭 링크나 junction 경로는 사용할 수 없습니다.",
+                    "확인");
+                return;
+            }
+            EditorPrefs.SetString(NodePreferenceKey, fullPath);
         }
 
         public static SpatialCalibrationWorkflowState LoadState()
@@ -255,7 +283,30 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var state = ScanOrResume();
             if (!File.Exists(state.reviewPagePath)) GenerateArtifacts(state);
             StartReviewBridge();
-            Application.OpenURL(new Uri(state.reviewPagePath).AbsoluteUri);
+            reviewOpenDeadline = EditorApplication.timeSinceStartup + 8d;
+            if (!reviewOpenPending)
+            {
+                reviewOpenPending = true;
+                EditorApplication.update += OpenReviewWhenReady;
+            }
+        }
+
+        private static void OpenReviewWhenReady()
+        {
+            if (!reviewOpenPending) return;
+            if (ReviewBridgeMatchesProject())
+            {
+                reviewOpenPending = false;
+                EditorApplication.update -= OpenReviewWhenReady;
+                // file:// remains a read-only artifact. Serving the page gives
+                // mutating requests an allow-listed loopback Origin.
+                Application.OpenURL("http://127.0.0.1:4174/workflow");
+                return;
+            }
+            if (EditorApplication.timeSinceStartup < reviewOpenDeadline) return;
+            reviewOpenPending = false;
+            EditorApplication.update -= OpenReviewWhenReady;
+            EditorUtility.DisplayDialog("사용자 검수", "로컬 검수 서버가 시작되지 않았습니다. unity-ctx와 Node 설정을 확인한 뒤 다시 시도하세요.", "확인");
         }
 
         private static void PollRequest()
@@ -496,27 +547,49 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
         private static void StartReviewBridge()
         {
-            if (PortOpen(4174) || reviewBridge is { HasExited: false }) return;
+            if (PortOpen(4174))
+            {
+                if (!ReviewBridgeMatchesProject())
+                    Debug.LogWarning("Port 4174 is already used by another project's Spatial Review Bridge. Close that bridge before opening this review.");
+                return;
+            }
+            if (reviewBridge is { HasExited: false }) return;
             var package = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(SpatialCalibrationWorkflow).Assembly);
             var server = Path.Combine(package.resolvedPath, "Tools~", "SpatialReviewBridge", "server.mjs");
             if (!File.Exists(server)) return;
             try
             {
+                McpBridgeHost.Start();
+                if (!McpBridgeHost.IsRunning || McpBridgeHost.Port <= 0 || string.IsNullOrWhiteSpace(McpBridgeHost.ReviewNonce))
+                {
+                    Debug.LogWarning("Spatial review bridge requires an active in-memory Unity bridge session.");
+                    return;
+                }
+                var nodeBinary = ResolveNodeBinary();
+                if (string.IsNullOrWhiteSpace(nodeBinary))
+                {
+                    Debug.LogWarning("Spatial review bridge is locked until a trusted external Node.js executable is selected at Tools > Concept Room Decorator > Fast Calibration > Configure Node.js.");
+                    return;
+                }
                 reviewBridge = Process.Start(new ProcessStartInfo
                 {
-                    FileName = "node",
+                    FileName = nodeBinary,
                     Arguments = $"\"{server}\" --project \"{ProjectRoot()}\"",
                     WorkingDirectory = ProjectRoot(),
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden
-                }.WithEnvironment("UNITY_CTX_BIN", ResolveUnityCtxBinary()));
+                }.WithEnvironment("UNITY_CTX_BIN", ResolveUnityCtxBinary())
+                 .WithEnvironment("SPATIAL_REVIEW_UNITY_PORT", McpBridgeHost.Port.ToString())
+                 .WithEnvironment("SPATIAL_REVIEW_UNITY_NONCE", McpBridgeHost.ReviewNonce));
             }
             catch (Exception exception) { Debug.LogWarning($"Spatial review bridge could not start: {exception.Message}"); }
         }
 
         private static void StopReviewBridge()
         {
+            reviewOpenPending = false;
+            EditorApplication.update -= OpenReviewWhenReady;
             try { if (reviewBridge is { HasExited: false }) reviewBridge.Kill(); }
             catch { }
             reviewBridge?.Dispose();
@@ -533,35 +606,67 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             catch { return false; }
         }
 
-        public static string ResolveUnityCtxBinary()
+        private static bool ReviewBridgeMatchesProject()
         {
-            var candidates = new[]
-            {
-                EditorPrefs.GetString(UnityCtxPreferenceKey, string.Empty),
-                Environment.GetEnvironmentVariable("UNITY_CTX_BIN"),
-                ProjectPath("Library/DungeonDecorator/Tools/unity-ctx.exe")
-            };
-            var direct = candidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
-            if (!string.IsNullOrWhiteSpace(direct)) return Path.GetFullPath(direct);
             try
             {
-                using var process = Process.Start(new ProcessStartInfo
-                {
-                    FileName = "where.exe",
-                    Arguments = "unity-ctx",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true
-                });
-                if (process != null && process.WaitForExit(1500) && process.ExitCode == 0)
-                {
-                    var path = process.StandardOutput.ReadLine();
-                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return Path.GetFullPath(path);
-                }
+                var request = WebRequest.CreateHttp("http://127.0.0.1:4174/api/health");
+                request.Timeout = 300;
+                request.ReadWriteTimeout = 300;
+                request.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore);
+                using var response = request.GetResponse();
+                using var reader = new StreamReader(response.GetResponseStream() ?? Stream.Null, Encoding.UTF8);
+                var health = JsonUtility.FromJson<ReviewBridgeHealth>(reader.ReadToEnd());
+                if (health == null || !health.connected || health.unityPort != McpBridgeHost.Port || string.IsNullOrWhiteSpace(health.projectRoot)) return false;
+                var comparison = Application.platform == RuntimePlatform.WindowsEditor ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                return string.Equals(Path.GetFullPath(health.projectRoot), Path.GetFullPath(ProjectRoot()), comparison);
             }
-            catch { }
-            return string.Empty;
+            catch { return false; }
+        }
+
+        [Serializable]
+        private sealed class ReviewBridgeHealth { public string projectRoot; public bool connected; public int unityPort; }
+
+        public static string ResolveUnityCtxBinary()
+        {
+            var configured = EditorPrefs.GetString(UnityCtxPreferenceKey, string.Empty);
+            return ResolveTrustedExecutablePath(configured);
+        }
+
+        public static string ResolveNodeBinary() =>
+            ResolveTrustedExecutablePath(EditorPrefs.GetString(NodePreferenceKey, string.Empty));
+
+        internal static string ResolveTrustedExecutablePath(string configured)
+        {
+            if (string.IsNullOrWhiteSpace(configured) || !Path.IsPathRooted(configured)) return string.Empty;
+            string fullPath;
+            try { fullPath = Path.GetFullPath(configured); }
+            catch { return string.Empty; }
+            if (!File.Exists(fullPath) || PathInside(ProjectRoot(), fullPath) || ContainsReparsePoint(fullPath)) return string.Empty;
+            return fullPath;
+        }
+
+        private static bool ContainsReparsePoint(string path)
+        {
+            try
+            {
+                var current = new FileInfo(path);
+                if ((current.Attributes & FileAttributes.ReparsePoint) != 0) return true;
+                var directory = current.Directory;
+                while (directory != null)
+                {
+                    if ((directory.Attributes & FileAttributes.ReparsePoint) != 0) return true;
+                    directory = directory.Parent;
+                }
+                return false;
+            }
+            catch { return true; }
+        }
+
+        private static bool PathInside(string root, string candidate)
+        {
+            var relative = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(candidate));
+            return relative == "." || (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal));
         }
 
         private static void AtomicWrite(string path, string content)

@@ -26,7 +26,7 @@ const spatialTranslations = {
     technical: "기술 게이트", human: "사용자 게이트", passed: "오류 0개", failed: "기술 오류", pending: "승인 대기", approved: "승인됨", revision: "수정 필요", unable: "판단 불가",
     measurements: "정확한 측정값", gap: "간격", penetration: "관통", support: "지지율", direction: "방향 일치", allowed: "허용", relation: "관계", frames: "접촉 프레임", contract: "계약 상태", captureHash: "캡처 해시",
     issuePrompt: "문제 영역", issues: ["OBB가 모델과 다름", "접촉면이 부자연스러움", "간격이 어색해 보임", "카메라로 판단하기 어려움"], comment: "의견을 남겨 주세요", approve: "승인", request: "수정 필요", cannotJudge: "판단 불가", approvalBlocked: "기술 오류가 있어 승인을 사용할 수 없습니다.",
-    aiTitle: "AI 임시 제안", aiBody: "AI는 back 프레임과 허용 간격을 제안할 수 있지만, 통과·승인·저장은 할 수 없습니다.", recapture: "재촬영 요청", latest: "최신 캡처", reviewer: "로컬 검수자: student-01", saved: "판정이 검수 기록에 반영되었습니다.", prototypeSaved: "프로토타입 판정만 변경되었습니다 · 로컬 브리지 연결 안 됨", bridgeOn: "로컬 승인 브리지 연결됨", bridgeOff: "프로토타입 모드", liveCapture: "실제 Unity 캡처",
+    aiTitle: "AI 임시 제안", aiBody: "AI는 back 프레임과 허용 간격을 제안할 수 있지만, 통과·승인·저장은 할 수 없습니다.", recapture: "재촬영 요청", latest: "최신 캡처", reviewer: "로컬 검수자: student-01", saved: "보안 검수 페이지를 열었습니다. 최종 판정은 그 페이지에서 완료하세요.", prototypeSaved: "프로토타입 판정만 변경되었습니다 · 로컬 브리지 연결 안 됨", bridgeOn: "로컬 승인 브리지 읽기 전용 연결", bridgeOff: "프로토타입 모드", liveCapture: "실제 Unity 캡처",
   },
   en: {
     studio: "Asset Geometry", calibration: "Spatial Calibration", queue: "Assets awaiting review", queueHelp: "Examples captured in Unity. Technical pass alone never activates a contract; human approval is required.",
@@ -34,7 +34,7 @@ const spatialTranslations = {
     technical: "Technical gate", human: "Human gate", passed: "0 errors", failed: "Technical errors", pending: "Awaiting approval", approved: "Approved", revision: "Revision requested", unable: "Unable to judge",
     measurements: "Exact measurements", gap: "Gap", penetration: "Penetration", support: "Support", direction: "Direction", allowed: "Allowed", relation: "Relation", frames: "Contact frames", contract: "Contract state", captureHash: "Capture hash",
     issuePrompt: "Problem area", issues: ["OBB does not match model", "Contact frame looks wrong", "Gap looks unnatural", "Camera is insufficient"], comment: "Add review notes", approve: "Approve", request: "Request revision", cannotJudge: "Unable to judge", approvalBlocked: "Approval is disabled while technical errors exist.",
-    aiTitle: "Temporary AI proposal", aiBody: "AI may suggest the back frame and tolerances, but cannot pass, approve, or save a contract.", recapture: "Request recapture", latest: "Latest capture", reviewer: "Local reviewer: student-01", saved: "Decision recorded in the review record.", prototypeSaved: "Prototype state only · local review bridge disconnected", bridgeOn: "Local approval bridge connected", bridgeOff: "Prototype mode", liveCapture: "Live Unity capture",
+    aiTitle: "Temporary AI proposal", aiBody: "AI may suggest the back frame and tolerances, but cannot pass, approve, or save a contract.", recapture: "Request recapture", latest: "Latest capture", reviewer: "Local reviewer: student-01", saved: "Opened the secure review page. Complete the final decision there.", prototypeSaved: "Prototype state only · local review bridge disconnected", bridgeOn: "Local approval bridge · read only", bridgeOff: "Prototype mode", liveCapture: "Live Unity capture",
   },
 };
 
@@ -353,19 +353,8 @@ function GeometryStudio({ locale }) {
       setNotice(copy.prototypeSaved);
       return;
     }
-    const decisionsByName = { approved: "Approved", revision: "RevisionRequested", unable: "UnableToJudge" };
-    try {
-      const response = await fetch("http://127.0.0.1:4174/api/spatial/review", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Spatial-Review-Nonce": bridge.nonce },
-        body: JSON.stringify({ decision: decisionsByName[next], reviewer: "student-01", issues: [...selectedIssues], comment }),
-      });
-      if (!response.ok) throw new Error("review bridge rejected the decision");
-      setNotice(copy.saved);
-    } catch {
-      setBridge({ connected: false, nonce: "" });
-      setNotice(copy.prototypeSaved);
-    }
+    window.open("http://127.0.0.1:4174/workflow", "_blank", "noopener,noreferrer");
+    setNotice(copy.saved);
   };
 
   const statusLabel = (item) => {

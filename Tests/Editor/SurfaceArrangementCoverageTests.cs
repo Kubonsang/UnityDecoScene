@@ -343,9 +343,10 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             catalog.RegisterAsset(new SupportAssetIdentity(
                 token.AssetId, tokenGuid, token.Geometry.dependencyHash, token.Geometry.dependencyHash, "coverage-token-family"));
             var document = ApprovedInteraction(tokenGuid, tableGuid, angleTolerance);
-            Assert.That(catalog.RegisterApprovedInteraction(new SupportInteractionBinding(
+            Assert.That(catalog.RegisterApprovedInteraction(SupportInteractionBinding.FromAuthorityVerifiedSnapshot(
                 document, token.AssetId, table.AssetId,
-                token.Geometry.dependencyHash, table.Geometry.dependencyHash), out var reason), Is.True, reason);
+                token.Geometry.dependencyHash, table.Geometry.dependencyHash,
+                SpatialContractHashUtility.ComputeContentHash(document)), out var reason), Is.True, reason);
             return catalog;
         }
 

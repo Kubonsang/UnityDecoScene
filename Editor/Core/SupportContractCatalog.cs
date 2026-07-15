@@ -58,20 +58,70 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string CanonicalTargetDescriptorId { get; }
         public string SubjectGeometryHash { get; }
         public string TargetGeometryHash { get; }
+        internal bool AuthorityVerified { get; }
+        internal string VerifiedContentHash { get; }
+        internal string VerifiedReviewJson { get; }
 
+        /// <summary>
+        /// Creates an unverified binding for migration and inspection only.
+        /// RegisterApprovedInteraction deliberately rejects this form; production
+        /// consumers must load a binding through SpatialContractIO so the external
+        /// human-approval ledger is checked first.
+        /// </summary>
         public SupportInteractionBinding(
             SpatialContractDocument document,
             string canonicalSubjectDescriptorId,
             string canonicalTargetDescriptorId,
             string subjectGeometryHash,
             string targetGeometryHash)
+            : this(
+                document,
+                canonicalSubjectDescriptorId,
+                canonicalTargetDescriptorId,
+                subjectGeometryHash,
+                targetGeometryHash,
+                false,
+                string.Empty,
+                string.Empty)
+        {
+        }
+
+        private SupportInteractionBinding(
+            SpatialContractDocument document,
+            string canonicalSubjectDescriptorId,
+            string canonicalTargetDescriptorId,
+            string subjectGeometryHash,
+            string targetGeometryHash,
+            bool authorityVerified,
+            string verifiedContentHash,
+            string verifiedReviewJson)
         {
             Document = document;
             CanonicalSubjectDescriptorId = canonicalSubjectDescriptorId?.Trim() ?? string.Empty;
             CanonicalTargetDescriptorId = canonicalTargetDescriptorId?.Trim() ?? string.Empty;
             SubjectGeometryHash = subjectGeometryHash?.Trim().ToLowerInvariant() ?? string.Empty;
             TargetGeometryHash = targetGeometryHash?.Trim().ToLowerInvariant() ?? string.Empty;
+            AuthorityVerified = authorityVerified;
+            VerifiedContentHash = verifiedContentHash?.Trim().ToLowerInvariant() ?? string.Empty;
+            VerifiedReviewJson = verifiedReviewJson ?? string.Empty;
         }
+
+        internal static SupportInteractionBinding FromAuthorityVerifiedSnapshot(
+            SpatialContractDocument document,
+            string canonicalSubjectDescriptorId,
+            string canonicalTargetDescriptorId,
+            string subjectGeometryHash,
+            string targetGeometryHash,
+            string verifiedContentHash) =>
+            new(
+                document,
+                canonicalSubjectDescriptorId,
+                canonicalTargetDescriptorId,
+                subjectGeometryHash,
+                targetGeometryHash,
+                true,
+                verifiedContentHash,
+                document?.review == null ? string.Empty : JsonUtility.ToJson(document.review, false));
     }
 
     /// <summary>
@@ -95,6 +145,25 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             assets[identity.DescriptorId] = identity;
         }
 
+        /// <summary>
+        /// Preferred production entry point. It verifies the exact contract
+        /// against the external human-approval ledger before registration.
+        /// </summary>
+        public bool RegisterApprovedInteraction(
+            string contractPath,
+            string canonicalSubjectDescriptorId,
+            string canonicalTargetDescriptorId,
+            out string reason)
+        {
+            if (!SpatialContractIO.TryLoadApprovedInteractionBinding(
+                    contractPath,
+                    canonicalSubjectDescriptorId,
+                    canonicalTargetDescriptorId,
+                    out var binding,
+                    out reason)) return false;
+            return RegisterApprovedInteraction(binding, out reason);
+        }
+
         public bool RegisterApprovedInteraction(SupportInteractionBinding binding, out string reason)
         {
             reason = null;
@@ -108,6 +177,22 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 return false;
             }
             if (!SpatialContractHashUtility.ValidateApproved(document, out reason)) return false;
+            var contentHash = SpatialContractHashUtility.ComputeContentHash(document);
+            if (!binding.AuthorityVerified || string.IsNullOrWhiteSpace(binding.VerifiedContentHash))
+            {
+                reason = "CONTRACT_AUTHORITY_REQUIRED interaction contracts must be loaded through the external approval-ledger verifier.";
+                return false;
+            }
+            if (!string.Equals(binding.VerifiedContentHash, contentHash, StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "CONTRACT_AUTHORITY_CHANGED interaction contract content changed after authority verification.";
+                return false;
+            }
+            if (!string.Equals(binding.VerifiedReviewJson, JsonUtility.ToJson(document.review, false), StringComparison.Ordinal))
+            {
+                reason = "CONTRACT_AUTHORITY_CHANGED interaction review evidence changed after authority verification.";
+                return false;
+            }
             if (!string.Equals(document.interaction.relation, "SupportedBy", StringComparison.OrdinalIgnoreCase))
             {
                 reason = "Only SupportedBy interactions are supported.";
@@ -142,7 +227,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 string.Equals(value.SubjectDescriptorId, canonicalSubjectDescriptorId, StringComparison.Ordinal) &&
                 string.Equals(value.TargetDescriptorId, canonicalTargetDescriptorId, StringComparison.Ordinal));
             interactions.Add(new RegisteredInteraction(
-                document.interaction,
+                CloneInteraction(document.interaction),
                 canonicalSubjectDescriptorId,
                 canonicalTargetDescriptorId,
                 binding.SubjectGeometryHash,
@@ -196,7 +281,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                     continue;
                 }
                 contract = new ResolvedSupportContract(
-                    value.Interaction,
+                    CloneInteraction(value.Interaction),
                     value.SubjectDescriptorId,
                     value.TargetDescriptorId,
                     !string.Equals(actualSubject.AssetGuid, canonicalSubject.AssetGuid, StringComparison.OrdinalIgnoreCase),
@@ -207,6 +292,27 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
             if (sawStale) errorCode = SurfaceArrangementErrorCodes.SupportContractStale;
             return false;
+        }
+
+        private static InteractionSpatialContractPayload CloneInteraction(InteractionSpatialContractPayload source)
+        {
+            if (source == null) return null;
+            return new InteractionSpatialContractPayload
+            {
+                subject_guid = source.subject_guid,
+                target_key = source.target_key,
+                relation = source.relation,
+                subject_frame = source.subject_frame,
+                target_frame = source.target_frame,
+                relative_position = source.relative_position?.ToArray() ?? Array.Empty<float>(),
+                relative_rotation = source.relative_rotation?.ToArray() ?? Array.Empty<float>(),
+                position_tolerance = source.position_tolerance?.ToArray() ?? Array.Empty<float>(),
+                angle_tolerance = source.angle_tolerance,
+                collision_policy = source.collision_policy,
+                revision = source.revision,
+                interaction_hash = source.interaction_hash,
+                capture_set_hash = source.capture_set_hash
+            };
         }
 
         public string ComputeHash()

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -12,6 +13,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
     public static class SpatialCalibrationCaptureService
     {
         private const int CaptureSize = 640;
+        private static readonly string[] RequiredCaptureNames =
+        {
+            "front.png", "side.png", "top.png", "contact.png",
+            "front-evidence.png", "side-evidence.png", "top-evidence.png", "contact-evidence.png",
+            "technical-report.json", "capture-manifest.json"
+        };
 
         public static SpatialCaptureSet Capture(SpatialCalibrationSession session, SpatialCalibrationReport report)
         {
@@ -42,10 +49,82 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             }
 
             set.report_path = Path.Combine(directory, "technical-report.json");
-            File.WriteAllText(set.report_path, JsonUtility.ToJson(report, true));
-            set.capture_set_hash = HashFiles(set.raw_paths.Concat(set.evidence_paths).Append(set.report_path));
+            set.manifest_path = Path.Combine(directory, "capture-manifest.json");
+            if (File.Exists(set.manifest_path)) File.Delete(set.manifest_path);
+            File.WriteAllText(set.report_path, JsonUtility.ToJson(report, true), new UTF8Encoding(false));
+            // The final hash is intentionally deferred until draft proposal hashes
+            // are known and capture-manifest.json can bind the images to them.
+            set.capture_set_hash = string.Empty;
             session.CaptureSet = set;
             return set;
+        }
+
+        public static void FinalizeCaptureSet(SpatialCaptureSet set, SpatialCaptureManifest manifest)
+        {
+            if (set == null) throw new ArgumentNullException(nameof(set));
+            if (manifest == null) throw new ArgumentNullException(nameof(manifest));
+            if (string.IsNullOrWhiteSpace(set.session_id) || !string.Equals(set.session_id, manifest.session_id, StringComparison.Ordinal))
+                throw new InvalidDataException("Capture manifest session_id does not match the capture set.");
+            if (manifest.schema_version != 1 || manifest.manifest_version != 1)
+                throw new InvalidDataException("Unsupported capture manifest schema/version.");
+            if (manifest.proposals == null || manifest.proposals.Count == 0)
+                throw new InvalidDataException("Capture manifest requires at least one proposal binding.");
+
+            manifest.proposals = manifest.proposals
+                .Where(value => value != null)
+                .OrderBy(value => (value.contract_type ?? string.Empty) + "\0" + (value.canonical_identity ?? string.Empty), StringComparer.Ordinal)
+                .ToList();
+            if (manifest.proposals.Count == 0 || manifest.proposals.Any(value =>
+                    string.IsNullOrWhiteSpace(value.contract_type) ||
+                    string.IsNullOrWhiteSpace(value.canonical_identity) ||
+                    !IsSha256(value.proposal_hash)))
+                throw new InvalidDataException("Capture manifest contains an invalid proposal binding.");
+            if (manifest.proposals
+                .GroupBy(value => (value.contract_type ?? string.Empty) + "\0" + (value.canonical_identity ?? string.Empty), StringComparer.Ordinal)
+                .Any(group => group.Count() != 1))
+                throw new InvalidDataException("Capture manifest contains duplicate proposal identities.");
+
+            if (string.IsNullOrWhiteSpace(set.report_path) || !File.Exists(set.report_path))
+                throw new FileNotFoundException("Capture technical report is missing.", set.report_path);
+            var report = JsonUtility.FromJson<SpatialCalibrationReport>(File.ReadAllText(set.report_path));
+            if (report == null ||
+                !string.Equals(report.session_id, set.session_id, StringComparison.Ordinal) ||
+                !string.Equals(report.report_hash, manifest.technical_report_hash, StringComparison.OrdinalIgnoreCase) ||
+                report.Passed != manifest.technical_passed ||
+                report.error_count != manifest.technical_error_count)
+                throw new InvalidDataException("Capture manifest technical summary does not match technical-report.json.");
+
+            if (string.IsNullOrWhiteSpace(set.manifest_path))
+                set.manifest_path = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(set.report_path)) ?? string.Empty, "capture-manifest.json");
+            File.WriteAllText(set.manifest_path, JsonUtility.ToJson(manifest, true) + "\n", new UTF8Encoding(false));
+            set.capture_set_hash = ComputeCaptureSetHash(set);
+        }
+
+        public static string ComputeCaptureSetHash(SpatialCaptureSet set)
+        {
+            if (set == null) throw new ArgumentNullException(nameof(set));
+            var paths = (set.raw_paths ?? new List<string>())
+                .Concat(set.evidence_paths ?? new List<string>())
+                .Append(set.report_path)
+                .Append(set.manifest_path)
+                .ToList();
+            if (paths.Count != RequiredCaptureNames.Length || paths.Any(string.IsNullOrWhiteSpace))
+                throw new InvalidDataException("Capture set must contain four raw views, four evidence views, a technical report, and a manifest.");
+
+            var directory = Path.GetFullPath(Path.GetDirectoryName(Path.GetFullPath(set.manifest_path)) ?? string.Empty);
+            var actualNames = paths.Select(path =>
+            {
+                var fullPath = Path.GetFullPath(path);
+                if (!string.Equals(Path.GetDirectoryName(fullPath), directory, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("All capture evidence must be stored in the same directory.");
+                if (!File.Exists(fullPath)) throw new FileNotFoundException("Capture evidence is missing.", fullPath);
+                return Path.GetFileName(fullPath);
+            }).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+            var expectedNames = RequiredCaptureNames.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+            if (!actualNames.SequenceEqual(expectedNames, StringComparer.Ordinal))
+                throw new InvalidDataException("Capture set does not contain the required fixed evidence filenames.");
+
+            return HashFiles(paths);
         }
 
         private static Vector3 ContactCenter(SpatialCalibrationReport report, Vector3 fallback)
@@ -204,7 +283,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private static string HashFiles(IEnumerable<string> paths)
         {
             using var sha = SHA256.Create();
-            foreach (var path in paths.OrderBy(value => value, StringComparer.Ordinal))
+            foreach (var path in paths.OrderBy(value => Path.GetFileName(value), StringComparer.Ordinal))
             {
                 var bytes = File.ReadAllBytes(path);
                 sha.TransformBlock(bytes, 0, bytes.Length, null, 0);
@@ -212,6 +291,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
             return string.Concat(sha.Hash.Select(value => value.ToString("x2")));
         }
+
+        private static bool IsSha256(string value) =>
+            !string.IsNullOrWhiteSpace(value) && value.Length == 64 && value.All(Uri.IsHexDigit);
 
         private readonly struct View
         {

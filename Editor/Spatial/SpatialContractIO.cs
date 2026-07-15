@@ -18,14 +18,24 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var directory = DraftDirectory();
             session.DraftPaths.Clear();
 
-            var assetDocument = CreateAssetDocument(session, report, captures, prefabPath, guid);
+            var proposalCapture = ProposalCapture(captures);
+            var assetDocument = CreateAssetDocument(session, report, proposalCapture, prefabPath, guid);
+            var documents = new List<SpatialContractDocument> { assetDocument };
+            if (session.Template == SpatialCalibrationTemplate.SupportedBy && session.TargetPrefab != null)
+                documents.Add(CreateInteractionDocument(session, report, proposalCapture, guid));
+
+            var manifest = BuildCaptureManifest(session.SessionId, report, documents);
+            SpatialCalibrationCaptureService.FinalizeCaptureSet(captures, manifest);
+            FinalizeDraftDocuments(documents, captures.capture_set_hash, manifest);
+
             var assetDraft = Path.Combine(directory, session.SessionId + ".spatial.json");
             WriteJson(assetDraft, assetDocument);
             session.DraftPaths.Add(assetDraft);
 
-            if (session.Template == SpatialCalibrationTemplate.SupportedBy && session.TargetPrefab != null)
+            if (documents.Count == 2)
             {
-                var interactionDraft = WriteInteractionDraftCore(session, report, captures, guid, directory);
+                var interactionDraft = Path.Combine(directory, session.SessionId + ".interaction.json");
+                WriteJson(interactionDraft, documents[1]);
                 session.DraftPaths.Add(interactionDraft);
             }
             return session.DraftPaths;
@@ -42,10 +52,60 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             session.DraftPaths.Clear();
             var directory = DraftDirectory();
             var supersededAssetDraft = Path.Combine(directory, session.SessionId + ".spatial.json");
+            var document = CreateInteractionDocument(session, report, ProposalCapture(captures), guid);
+            var manifest = BuildCaptureManifest(session.SessionId, report, new[] { document });
+            SpatialCalibrationCaptureService.FinalizeCaptureSet(captures, manifest);
+            FinalizeDraftDocuments(new[] { document }, captures.capture_set_hash, manifest);
+            var path = Path.Combine(directory, session.SessionId + ".interaction.json");
+            WriteJson(path, document);
             if (File.Exists(supersededAssetDraft)) File.Delete(supersededAssetDraft);
-            var path = WriteInteractionDraftCore(session, report, captures, guid, directory);
             session.DraftPaths.Add(path);
             return path;
+        }
+
+        public static SpatialCaptureManifest BuildCaptureManifest(
+            string sessionId,
+            SpatialCalibrationReport report,
+            IEnumerable<SpatialContractDocument> documents)
+        {
+            if (string.IsNullOrWhiteSpace(sessionId)) throw new ArgumentException("Capture manifest session_id is required.", nameof(sessionId));
+            if (report == null) throw new ArgumentNullException(nameof(report));
+            if (!string.Equals(sessionId, report.session_id, StringComparison.Ordinal))
+                throw new InvalidDataException("Capture manifest session_id does not match the technical report.");
+            var proposals = (documents ?? throw new ArgumentNullException(nameof(documents)))
+                .Where(value => value != null)
+                .Select(value => new SpatialCaptureProposalBinding
+                {
+                    contract_type = value.contract_type,
+                    canonical_identity = CanonicalProposalIdentity(value),
+                    proposal_hash = SpatialContractHashUtility.ComputeProposalHash(value)
+                })
+                .OrderBy(value => (value.contract_type ?? string.Empty) + "\0" + (value.canonical_identity ?? string.Empty), StringComparer.Ordinal)
+                .ToList();
+            if (proposals.Count == 0) throw new InvalidDataException("Capture manifest requires at least one proposal.");
+            return new SpatialCaptureManifest
+            {
+                schema_version = 1,
+                manifest_version = 1,
+                session_id = sessionId,
+                proposals = proposals,
+                technical_report_hash = report.report_hash,
+                technical_passed = report.Passed,
+                technical_error_count = report.error_count
+            };
+        }
+
+        public static string CanonicalProposalIdentity(SpatialContractDocument document)
+        {
+            if (document?.contract_type == "asset" && document.asset != null)
+                return (document.asset.asset_guid ?? string.Empty).Trim().ToLowerInvariant();
+            if (document?.contract_type == "interaction" && document.interaction != null)
+            {
+                var value = document.interaction;
+                return (value.subject_guid ?? string.Empty).Trim().ToLowerInvariant() + "__" +
+                       Utf8Hex(value.target_key) + "__" + Utf8Hex(value.relation);
+            }
+            throw new InvalidDataException("Proposal identity requires exactly one payload matching contract_type.");
         }
 
         public static SpatialContractDocument Load(string path)
@@ -196,6 +256,32 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             var dependencyHash = AssetDatabase.GetAssetDependencyHash(prefabPath).ToString();
             if (!string.Equals(document.asset.asset_guid, guid, StringComparison.OrdinalIgnoreCase)) { reason = "Asset GUID does not match the descriptor prefab."; return false; }
             if (!string.Equals(document.asset.dependency_hash, dependencyHash, StringComparison.Ordinal)) { reason = "Contract is stale because the prefab dependency hash changed."; return false; }
+            var verifiedContentHash = SpatialContractHashUtility.ComputeContentHash(document);
+            var verifiedReviewJson = JsonUtility.ToJson(document.review, false);
+            if (!SpatialContractAuthorityVerifier.Verify(path, verifiedContentHash, out reason)) return false;
+
+            // Consume the exact snapshot that the external ledger verified.
+            try { document = Load(path); }
+            catch (Exception exception) { reason = "CONTRACT_AUTHORITY_CHANGED " + exception.Message; return false; }
+            if (!SpatialContractHashUtility.ValidateApproved(document, out reason) ||
+                !string.Equals(SpatialContractHashUtility.ComputeContentHash(document), verifiedContentHash, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(JsonUtility.ToJson(document.review, false), verifiedReviewJson, StringComparison.Ordinal))
+            {
+                reason = "CONTRACT_AUTHORITY_CHANGED contract content or review evidence changed during authority verification.";
+                return false;
+            }
+            var latestPrefabPath = AssetDatabase.GetAssetPath(descriptor.Prefab);
+            var latestGuid = AssetDatabase.AssetPathToGUID(latestPrefabPath);
+            var latestDependencyHash = AssetDatabase.GetAssetDependencyHash(latestPrefabPath).ToString();
+            if (!string.Equals(latestPrefabPath, prefabPath, StringComparison.Ordinal) ||
+                !string.Equals(latestGuid, guid, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(latestDependencyHash, dependencyHash, StringComparison.Ordinal) ||
+                !string.Equals(document.asset.asset_guid, latestGuid, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(document.asset.dependency_hash, latestDependencyHash, StringComparison.Ordinal))
+            {
+                reason = "CONTRACT_AUTHORITY_CHANGED prefab identity or dependency changed during authority verification.";
+                return false;
+            }
 
             var frames = document.asset.frames.ToDictionary(value => value.id, value => value.ToFrame(), StringComparer.Ordinal);
             var importedContacts = document.asset.contacts.Select(ToRules).ToList();
@@ -214,26 +300,135 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 contacts = importedContacts,
                 inferenceConfidence = 1f,
                 reviewed = true,
-                dependencyHash = dependencyHash
+                dependencyHash = latestDependencyHash
             };
             profile.Normalize();
             return true;
         }
 
+        /// <summary>
+        /// Loads an Approved interaction as an authority-bearing catalog binding.
+        /// A caller cannot manufacture this provenance from tracked JSON alone:
+        /// the external ledger is checked and the exact semantic snapshot is
+        /// reloaded before the binding is returned.
+        /// </summary>
+        public static bool TryLoadApprovedInteractionBinding(
+            string path,
+            string canonicalSubjectDescriptorId,
+            string canonicalTargetDescriptorId,
+            out SupportInteractionBinding binding,
+            out string reason)
+        {
+            binding = null;
+            reason = null;
+            SpatialContractDocument document;
+            try { document = Load(path); }
+            catch (Exception exception) { reason = exception.Message; return false; }
+            if (!document.IsApproved || document.contract_type != "interaction" || document.interaction == null)
+            {
+                reason = "Only human-approved interaction contracts can be loaded.";
+                return false;
+            }
+            if (!SpatialContractHashUtility.ValidateApproved(document, out reason)) return false;
+            var verifiedContentHash = SpatialContractHashUtility.ComputeContentHash(document);
+            var verifiedReviewJson = JsonUtility.ToJson(document.review, false);
+            if (!SpatialContractAuthorityVerifier.TryVerify(path, verifiedContentHash, out var authority, out reason)) return false;
+            if (!string.Equals(authority.contract_type, "interaction", StringComparison.Ordinal) ||
+                !string.Equals(authority.subject_guid, document.interaction.subject_guid, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(authority.target_key, document.interaction.target_key, StringComparison.Ordinal) ||
+                !IsSha256(authority.subject_geometry_hash) || !IsSha256(authority.target_geometry_hash))
+            {
+                reason = "CONTRACT_AUTHORITY_REJECTED interaction receipt does not match its verified subject, target, or geometry binding.";
+                return false;
+            }
+
+            // Consume the exact semantic snapshot that the external ledger
+            // verified. Registration separately rechecks this hash so callers
+            // cannot mutate the returned document between load and registration.
+            try { document = Load(path); }
+            catch (Exception exception) { reason = "CONTRACT_AUTHORITY_CHANGED " + exception.Message; return false; }
+            if (!document.IsApproved || document.contract_type != "interaction" || document.interaction == null)
+            {
+                reason = "CONTRACT_AUTHORITY_CHANGED contract type or approval state changed during authority verification.";
+                return false;
+            }
+            if (!SpatialContractHashUtility.ValidateApproved(document, out var validationReason))
+            {
+                reason = "CONTRACT_AUTHORITY_CHANGED " + validationReason;
+                return false;
+            }
+            if (!string.Equals(
+                    SpatialContractHashUtility.ComputeContentHash(document),
+                    verifiedContentHash,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(JsonUtility.ToJson(document.review, false), verifiedReviewJson, StringComparison.Ordinal))
+            {
+                reason = "CONTRACT_AUTHORITY_CHANGED interaction content or review evidence changed during authority verification.";
+                return false;
+            }
+
+            binding = SupportInteractionBinding.FromAuthorityVerifiedSnapshot(
+                document,
+                canonicalSubjectDescriptorId,
+                canonicalTargetDescriptorId,
+                authority.subject_geometry_hash,
+                authority.target_geometry_hash,
+                verifiedContentHash);
+            return true;
+        }
+
         public static string ApprovedAssetPath(string assetGuid) => $"Assets/SpatialContracts/Assets/{assetGuid}.spatial.json";
 
-        private static string WriteInteractionDraftCore(
-            SpatialCalibrationSession session,
-            SpatialCalibrationReport report,
-            SpatialCaptureSet captures,
-            string subjectGuid,
-            string directory)
+        private static bool IsSha256(string value) =>
+            !string.IsNullOrWhiteSpace(value) && value.Length == 64 && value.All(Uri.IsHexDigit);
+
+        private static SpatialCaptureSet ProposalCapture(SpatialCaptureSet captures) => new()
         {
-            var document = CreateInteractionDocument(session, report, captures, subjectGuid);
-            var path = Path.Combine(directory, session.SessionId + ".interaction.json");
-            WriteJson(path, document);
-            return path;
+            session_id = captures.session_id,
+            capture_set_hash = string.Empty
+        };
+
+        private static void FinalizeDraftDocuments(
+            IEnumerable<SpatialContractDocument> source,
+            string captureSetHash,
+            SpatialCaptureManifest manifest)
+        {
+            var documents = source.Where(value => value != null).ToList();
+            foreach (var document in documents)
+            {
+                if (document.contract_type == "asset" && document.asset != null)
+                {
+                    document.asset.capture_set_hash = captureSetHash;
+                    document.asset.geometry_hash = SpatialContractHashUtility.ComputeGeometryHash(document.asset);
+                }
+                else if (document.contract_type == "interaction" && document.interaction != null)
+                {
+                    document.interaction.capture_set_hash = captureSetHash;
+                    document.interaction.interaction_hash = SpatialContractHashUtility.ComputeInteractionHash(document.interaction);
+                }
+                else throw new InvalidDataException("Draft contains a payload that does not match contract_type.");
+            }
+
+            var actual = documents.Select(value => new SpatialCaptureProposalBinding
+                {
+                    contract_type = value.contract_type,
+                    canonical_identity = CanonicalProposalIdentity(value),
+                    proposal_hash = SpatialContractHashUtility.ComputeProposalHash(value)
+                })
+                .OrderBy(value => value.contract_type + "\0" + value.canonical_identity, StringComparer.Ordinal)
+                .ToList();
+            var expected = (manifest?.proposals ?? new List<SpatialCaptureProposalBinding>())
+                .OrderBy(value => value.contract_type + "\0" + value.canonical_identity, StringComparer.Ordinal)
+                .ToList();
+            if (actual.Count != expected.Count || actual.Where((value, index) =>
+                    !string.Equals(value.contract_type, expected[index].contract_type, StringComparison.Ordinal) ||
+                    !string.Equals(value.canonical_identity, expected[index].canonical_identity, StringComparison.Ordinal) ||
+                    !string.Equals(value.proposal_hash, expected[index].proposal_hash, StringComparison.OrdinalIgnoreCase)).Any())
+                throw new InvalidDataException("Final draft proposal does not match capture-manifest.json.");
         }
+
+        private static string Utf8Hex(string value) => string.Concat(
+            Encoding.UTF8.GetBytes(value ?? string.Empty).Select(item => item.ToString("x2")));
 
         private static string DraftDirectory()
         {
@@ -246,6 +441,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             if (session == null || report == null || captures == null)
                 throw new ArgumentNullException("Session, report, and captures are required.");
+            if (!string.Equals(session.SessionId, report.session_id, StringComparison.Ordinal) ||
+                !string.Equals(session.SessionId, captures.session_id, StringComparison.Ordinal))
+                throw new InvalidDataException("Session, technical report, and capture set IDs must match.");
         }
 
         private static SpatialContractDocument CreateAssetDocument(SpatialCalibrationSession session, SpatialCalibrationReport report, SpatialCaptureSet captures, string prefabPath, string guid)

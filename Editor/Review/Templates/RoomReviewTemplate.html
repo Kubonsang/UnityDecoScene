@@ -93,6 +93,12 @@ async function load(){
     const stateValue=await current.json();if(!current.ok)throw new Error(stateValue.error||'검수 자료를 불러오지 못했습니다.');if(state&&((state.runId!==stateValue.runId)||(state.captureHash!==stateValue.captureHash)))seenViews.clear();state=stateValue;render();
   }catch(error){$('#state-pill').textContent='연결 오류';$('#app').innerHTML=`<section class="card section"><h2>검수 자료를 열 수 없습니다</h2><p class="errors">${escapeHtml(error.message)}</p><p class="empty">Unity에서 검수 준비를 다시 실행한 뒤 새로고침하세요.</p></section>`}
 }
+async function freshNonce(){
+  const health=await fetch('/api/health',{cache:'no-store'});
+  const value=await health.json();
+  if(!health.ok||!value.nonce)throw new Error(value.error||'로컬 검수 서버에서 승인 토큰을 받지 못했습니다.');
+  nonce=value.nonce;return nonce;
+}
 async function submitDecision(decision){
   if(busy||!state||!nonce)return;
   const issues=[...document.querySelectorAll('input[name="issue"]:checked')].map(input=>input.value);
@@ -100,6 +106,7 @@ async function submitDecision(decision){
   if(decision==='RevisionRequested'&&!issues.length&&!comment){const message=$('#message');message.textContent='수정할 문제를 선택하거나 이유를 적어주세요.';message.className='message error';return}
   busy=true;updateButtons();const message=$('#message');message.textContent='판정을 안전하게 저장하고 있습니다…';message.className='message';
   try{
+    await freshNonce();
     const response=await fetch('/api/room-review/decision',{method:'POST',headers:{'Content-Type':'application/json','X-Spatial-Review-Nonce':nonce},body:JSON.stringify({runId:state.runId,inputHash:state.inputHash,validationHash:state.validationHash,captureHash:state.captureHash,decision,issues,comment})});
     const result=await response.json();if(!response.ok)throw new Error(result.error||'판정을 저장하지 못했습니다.');await load();
   }catch(error){busy=false;message.textContent=error.message;message.className='message error';updateButtons()}

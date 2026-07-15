@@ -117,8 +117,9 @@ namespace UnityDecoScene.DungeonDecorator.Tests
             catalog.RegisterAsset(new SupportAssetIdentity(
                 "target", targetGuid, approved.GeometryHash, changed.GeometryHash, "target-family"));
             var document = ApprovedInteraction(subjectGuid, targetGuid);
-            Assert.That(catalog.RegisterApprovedInteraction(new SupportInteractionBinding(
-                    document, "subject", "target", "subject-geometry", approved.GeometryHash), out var reason),
+            Assert.That(catalog.RegisterApprovedInteraction(SupportInteractionBinding.FromAuthorityVerifiedSnapshot(
+                    document, "subject", "target", "subject-geometry", approved.GeometryHash,
+                    SpatialContractHashUtility.ComputeContentHash(document)), out var reason),
                 Is.True, reason);
             Assert.That(catalog.TryResolve("subject", "target", out _, out code), Is.False);
             Assert.That(code, Is.EqualTo(SurfaceArrangementErrorCodes.SupportContractStale));

@@ -20,9 +20,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         private static Thread listenerThread;
         private static CancellationTokenSource cancellation;
         private static string nonce;
+        private static string reviewNonce;
 
         public static bool IsRunning => listener != null;
         public static int Port { get; private set; }
+        internal static string SessionNonce => nonce;
+        internal static string ReviewNonce => reviewNonce;
         public static string SessionFilePath => Path.GetFullPath(Path.Combine(Application.dataPath, "../Library/DungeonDecorator/session.json"));
 
         static McpBridgeHost()
@@ -40,6 +43,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             {
                 cancellation = new CancellationTokenSource();
                 nonce = Guid.NewGuid().ToString("N");
+                reviewNonce = Guid.NewGuid().ToString("N");
                 listener = new TcpListener(IPAddress.Loopback, 0);
                 listener.Start();
                 Port = ((IPEndPoint)listener.LocalEndpoint).Port;
@@ -60,6 +64,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             try { listener?.Stop(); } catch { }
             listener = null;
             Port = 0;
+            nonce = null;
+            reviewNonce = null;
             if (File.Exists(SessionFilePath))
             {
                 try { File.Delete(SessionFilePath); } catch { }
@@ -89,17 +95,19 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                         continue;
                     }
 
-                    if (envelope == null || envelope.nonce != nonce)
+                    if (envelope == null || !IsAuthorizedNonce(envelope.nonce, envelope.tool))
                     {
-                        writer.WriteLine(JsonUtility.ToJson(BridgeResponse.Fail("The Unity session nonce is invalid.")));
+                        writer.WriteLine(JsonUtility.ToJson(BridgeResponse.Fail("The Unity bridge nonce is invalid for this capability.")));
                         continue;
                     }
 
                     var pending = new PendingRequest(envelope);
                     Pending.Enqueue(pending);
-                    if (!pending.Completed.Wait(TimeSpan.FromSeconds(30)))
+                    var confirmationRequest = IsPrivateReviewTool(envelope.tool);
+                    var timeout = confirmationRequest ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(30);
+                    if (!pending.Completed.Wait(timeout))
                     {
-                        writer.WriteLine(JsonUtility.ToJson(BridgeResponse.Fail("Unity did not complete the request within 30 seconds.")));
+                        writer.WriteLine(JsonUtility.ToJson(BridgeResponse.Fail($"Unity did not complete the request within {timeout.TotalSeconds:0} seconds.")));
                         continue;
                     }
                     writer.WriteLine(JsonUtility.ToJson(pending.Response ?? BridgeResponse.Fail("Unity returned no response.")));
@@ -148,6 +156,12 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 "prepare_room_review" => PrepareRoomReview(),
                 "get_room_review_agent_brief" => GetRoomReviewAgentBrief(),
                 "verify_room_review" => VerifyRoomReview(Parse<VerifyRoomReviewArgs>(argumentsJson)),
+                // Private bridge-only capability. It is deliberately absent from
+                // the MCP tool catalog and cannot approve anything by itself.
+                "confirm_room_review_decision" => ConfirmRoomReviewDecision(Parse<ConfirmRoomReviewDecisionArgs>(argumentsJson)),
+                "confirm_spatial_contract_review_decision" => ConfirmSpatialContractReviewDecision(Parse<ConfirmSpatialContractReviewDecisionArgs>(argumentsJson)),
+                "confirm_spatial_contract_approval" => ConfirmSpatialContractApproval(Parse<ConfirmSpatialContractApprovalArgs>(argumentsJson)),
+                "confirm_spatial_contract_batch_approval" => ConfirmSpatialContractBatchApproval(Parse<ConfirmSpatialContractBatchApprovalArgs>(argumentsJson)),
                 "discard_preview" => DiscardPreview(),
                 "begin_spatial_calibration" => BeginSpatialCalibration(Parse<BeginSpatialCalibrationArgs>(argumentsJson)),
                 "inspect_spatial_calibration" => InspectSpatialCalibration(),
@@ -362,6 +376,146 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 args.captureSetHash));
         }
 
+        internal static bool IsAuthorizedNonce(string suppliedNonce, string tool)
+        {
+            var expected = IsPrivateReviewTool(tool) ? reviewNonce : nonce;
+            return !string.IsNullOrWhiteSpace(expected) &&
+                   string.Equals(suppliedNonce, expected, StringComparison.Ordinal);
+        }
+
+        internal static bool IsPrivateReviewTool(string tool) =>
+            string.Equals(tool, "confirm_spatial_contract_approval", StringComparison.Ordinal) ||
+            string.Equals(tool, "confirm_spatial_contract_batch_approval", StringComparison.Ordinal) ||
+            string.Equals(tool, "confirm_spatial_contract_review_decision", StringComparison.Ordinal) ||
+            string.Equals(tool, "confirm_room_review_decision", StringComparison.Ordinal);
+
+        private static BridgeResponse ConfirmRoomReviewDecision(ConfirmRoomReviewDecisionArgs args)
+        {
+            if (args == null || string.IsNullOrWhiteSpace(args.runId) || args.runId.Length > 128 || args.runId.Any(char.IsControl) ||
+                !IsSha256(args.inputHash) || !IsSha256(args.technicalReportHash) || !IsSha256(args.captureSetHash) ||
+                args.decision is not (RoomReviewDecisions.Approved or RoomReviewDecisions.RevisionRequested or RoomReviewDecisions.UnableToJudge) ||
+                args.issueCount < 0 || args.issueCount > 16 || (args.comment?.Length ?? 0) > 4000 ||
+                (args.comment?.Any(char.IsControl) == true && args.comment.Any(value => value is not ('\r' or '\n' or '\t'))))
+                return BridgeResponse.Fail("Room review confirmation binding is incomplete.");
+
+            var verification = RoomReviewWorkflow.VerifyCurrent(
+                args.runId,
+                args.inputHash,
+                args.technicalReportHash,
+                args.captureSetHash);
+            if (!verification.valid || verification.technicalErrorCount != 0)
+                return BridgeResponse.Fail("Room review evidence changed before final confirmation: " + verification.reason);
+
+            var decisionLabel = args.decision switch
+            {
+                RoomReviewDecisions.Approved => "승인",
+                RoomReviewDecisions.RevisionRequested => "수정 필요",
+                _ => "판단 불가"
+            };
+            var target = string.IsNullOrWhiteSpace(args.targetName) ? "현재 방" :
+                new string(args.targetName.Where(value => !char.IsControl(value)).Take(120).ToArray());
+            var note = string.IsNullOrWhiteSpace(args.comment) ? "없음" :
+                new string(args.comment.Trim().Where(value => !char.IsControl(value) || value is '\r' or '\n' or '\t').Take(280).ToArray());
+            var confirmed = EditorUtility.DisplayDialog(
+                "방 검수 최종 판정",
+                $"웹에서 선택한 방 검수 판정을 저장할까요?\n\n대상: {target}\n판정: {decisionLabel}\n문제 선택: {args.issueCount}개\n메모: {note}\n\n실행: {args.runId}\n입력: {args.inputHash[..12]}…\n기술: {args.technicalReportHash[..12]}…\n캡처: {args.captureSetHash[..12]}…\n\n이 확인은 위 증거와 판정에만 유효합니다.",
+                $"{decisionLabel} 저장",
+                "취소");
+            return BridgeResponse.Success(new ConfirmSpatialContractApprovalDto { confirmed = confirmed });
+        }
+
+        private static bool IsSha256(string value) =>
+            !string.IsNullOrWhiteSpace(value) && value.Length == 64 && value.All(Uri.IsHexDigit);
+
+        private static BridgeResponse ConfirmSpatialContractReviewDecision(ConfirmSpatialContractReviewDecisionArgs args)
+        {
+            if (args == null || !IsSha256(args.contractHash) || string.IsNullOrWhiteSpace(args.captureSetHash) ||
+                args.captureSetHash.Length > 128 || args.captureSetHash.Any(char.IsControl) ||
+                args.decision is not (SpatialContractStates.RevisionRequested or SpatialContractStates.UnableToJudge) ||
+                string.IsNullOrWhiteSpace(args.reviewer) || args.reviewer.Length > 128 || args.reviewer.Any(char.IsControl) ||
+                string.IsNullOrWhiteSpace(args.draftPath) || args.issueCount < 0 || args.issueCount > 16 ||
+                (args.comment?.Length ?? 0) > 4000)
+                return BridgeResponse.Fail("Spatial review decision confirmation binding is incomplete.");
+
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+            var libraryRoot = Path.GetFullPath(Path.Combine(projectRoot, "Library"));
+            var draftPath = Path.GetFullPath(args.draftPath);
+            var relative = Path.GetRelativePath(libraryRoot, draftPath);
+            if (string.IsNullOrWhiteSpace(relative) || relative == "." || relative.StartsWith("..", StringComparison.Ordinal) ||
+                Path.IsPathRooted(relative) || !File.Exists(draftPath))
+                return BridgeResponse.Fail("Spatial review draft must be an existing file under this project's Library folder.");
+
+            SpatialContractDocument document;
+            try { document = SpatialContractIO.Load(draftPath); }
+            catch (Exception exception) { return BridgeResponse.Fail("Spatial review draft could not be loaded: " + exception.Message); }
+            var captureHash = document.contract_type == "asset"
+                ? document.asset?.capture_set_hash
+                : document.interaction?.capture_set_hash;
+            if (document.state != SpatialContractStates.AwaitingHumanReview || document.technical?.passed != true || document.technical.error_count != 0 ||
+                !string.Equals(SpatialContractHashUtility.ComputeContentHash(document), args.contractHash, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(captureHash, args.captureSetHash, StringComparison.Ordinal))
+                return BridgeResponse.Fail("Spatial review draft changed before final confirmation.");
+
+            var decisionLabel = args.decision == SpatialContractStates.RevisionRequested ? "수정 필요" : "판단 불가";
+            var label = string.IsNullOrWhiteSpace(args.displayName) ? Path.GetFileName(draftPath) :
+                new string(args.displayName.Where(value => !char.IsControl(value)).Take(120).ToArray());
+            var note = string.IsNullOrWhiteSpace(args.comment) ? "없음" :
+                new string(args.comment.Trim().Where(value => !char.IsControl(value) || value is '\r' or '\n' or '\t').Take(280).ToArray());
+            var confirmed = EditorUtility.DisplayDialog(
+                "공간 계약 검수 판정",
+                $"웹에서 선택한 공간 계약 판정을 임시 검수 이력에 저장할까요?\n\n대상: {label}\n판정: {decisionLabel}\n검수자: {args.reviewer.Trim()}\n문제 선택: {args.issueCount}개\n메모: {note}\n계약: {args.contractHash[..12]}…\n캡처: {args.captureSetHash}\n\nTracked 계약에는 적용되지 않으며, 이 draft와 증거에만 판정이 기록됩니다.",
+                $"{decisionLabel} 저장",
+                "취소");
+            return BridgeResponse.Success(new ConfirmSpatialContractApprovalDto { confirmed = confirmed });
+        }
+
+        private static BridgeResponse ConfirmSpatialContractApproval(ConfirmSpatialContractApprovalArgs args)
+        {
+            if (args == null || string.IsNullOrWhiteSpace(args.contractHash) || args.contractHash.Length != 64 ||
+                args.contractHash.Any(value => !Uri.IsHexDigit(value)) || string.IsNullOrWhiteSpace(args.captureSetHash) ||
+                !(string.Equals(args.currentHash, "absent", StringComparison.Ordinal) ||
+                  (!string.IsNullOrWhiteSpace(args.currentHash) && args.currentHash.Length == 64 && args.currentHash.All(Uri.IsHexDigit))) ||
+                string.IsNullOrWhiteSpace(args.reviewer) || args.reviewer.Length > 128 || args.reviewer.Any(char.IsControl) ||
+                args.captureSetHash.Length > 128 || args.captureSetHash.Any(char.IsControl) || string.IsNullOrWhiteSpace(args.destination))
+                return BridgeResponse.Fail("Approval confirmation binding is incomplete.");
+
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+            var contractsRoot = Path.GetFullPath(Path.Combine(projectRoot, "Assets", "SpatialContracts"));
+            var destination = Path.GetFullPath(args.destination);
+            var relative = Path.GetRelativePath(contractsRoot, destination);
+            if (string.IsNullOrWhiteSpace(relative) || relative == "." || relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+                return BridgeResponse.Fail("Approval destination must be under Assets/SpatialContracts.");
+
+            var label = string.IsNullOrWhiteSpace(args.displayName) ? Path.GetFileName(destination) : args.displayName.Trim();
+            label = new string(label.Where(value => !char.IsControl(value)).Take(120).ToArray());
+            var confirmed = EditorUtility.DisplayDialog(
+                "공간 계약 최종 승인",
+                $"웹 검수에서 승인한 내용을 최종 저장할까요?\n\n대상: {label}\n검수자: {args.reviewer.Trim()}\n계약: {args.contractHash[..12]}…\n기준: {(args.currentHash == "absent" ? "새 계약" : args.currentHash[..12] + "…")}\n캡처: {args.captureSetHash}\n\n승인하면 외부 승인 기록과 계약 파일이 함께 저장됩니다.",
+                "승인하고 저장",
+                "취소");
+            return BridgeResponse.Success(new ConfirmSpatialContractApprovalDto { confirmed = confirmed });
+        }
+
+        private static BridgeResponse ConfirmSpatialContractBatchApproval(ConfirmSpatialContractBatchApprovalArgs args)
+        {
+            if (args == null || string.IsNullOrWhiteSpace(args.batchHash) || args.batchHash.Length != 64 ||
+                args.batchHash.Any(value => !Uri.IsHexDigit(value)) || args.itemCount < 1 || args.itemCount > 100 ||
+                string.IsNullOrWhiteSpace(args.reviewer) || args.reviewer.Length > 128 || args.reviewer.Any(char.IsControl))
+                return BridgeResponse.Fail("Batch approval confirmation binding is incomplete.");
+            var names = (args.displayNames ?? Array.Empty<string>())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => new string(value.Where(character => !char.IsControl(character)).Take(60).ToArray()))
+                .Take(8).ToArray();
+            var summary = names.Length == 0 ? string.Empty : "\n\n" + string.Join("\n", names.Select(value => "• " + value));
+            if ((args.displayNames?.Length ?? 0) > names.Length) summary += $"\n• 그 외 {(args.displayNames?.Length ?? 0) - names.Length}개";
+            var confirmed = EditorUtility.DisplayDialog(
+                "공간 계약 일괄 최종 승인",
+                $"검수한 공간 계약 {args.itemCount}개를 최종 저장할까요?\n\n검수자: {args.reviewer.Trim()}\n묶음: {args.batchHash[..12]}…{summary}\n\n각 계약은 저장 직전 다시 검증되며, 하나라도 바뀌면 그 지점에서 중단됩니다.",
+                $"{args.itemCount}개 승인하고 저장",
+                "취소");
+            return BridgeResponse.Success(new ConfirmSpatialContractApprovalDto { confirmed = confirmed });
+        }
+
         private static BridgeResponse DiscardPreview()
         {
             RoomPreviewManager.DiscardPreview();
@@ -445,6 +599,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 captureSetHash = captures.capture_set_hash,
                 rawPaths = captures.raw_paths.ToArray(),
                 evidencePaths = captures.evidence_paths.ToArray(),
+                manifestPath = captures.manifest_path,
                 draftPaths = session.DraftPaths.ToArray()
             }, paths);
         }
@@ -641,6 +796,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class VisualReviewArgs { public int mood; public int style; public int story; public int composition; public string feedback; }
         [Serializable] private sealed class SpatialProposalArgs { public string proposalJson; }
         [Serializable] private sealed class VerifyRoomReviewArgs { public string runId; public string inputHash; public string technicalReportHash; public string captureSetHash; }
+        [Serializable] private sealed class ConfirmRoomReviewDecisionArgs { public string runId; public string inputHash; public string technicalReportHash; public string captureSetHash; public string decision; public int issueCount; public string comment; public string targetName; }
+        [Serializable] private sealed class ConfirmSpatialContractReviewDecisionArgs { public string contractHash; public string captureSetHash; public string decision; public string reviewer; public string draftPath; public string displayName; public int issueCount; public string comment; }
+        [Serializable] private sealed class ConfirmSpatialContractApprovalArgs { public string contractHash; public string currentHash; public string captureSetHash; public string reviewer; public string destination; public string displayName; }
+        [Serializable] private sealed class ConfirmSpatialContractBatchApprovalArgs { public string batchHash; public int itemCount; public string reviewer; public string[] displayNames; }
         [Serializable] internal sealed class BeginSpatialCalibrationArgs { public string descriptorAssetPath; public string template; public string targetPrefabPath; public string targetDescriptorAssetPath; public string subjectFrameId; public string targetFrameId; }
         [Serializable] internal sealed class CreatePreviewArgs
         {
@@ -670,8 +829,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         [Serializable] private sealed class PreviewResultDto { public string sessionId; public int placementCount; public int assetGapCount; public string manifestHash; public string geometryProfileHash; public string authoringSourceHash; public string obstacleGeometryHash; public string supportContractHash; public int arrangementCount; public string[] arrangementIds; public bool inheritedAuthoringContext; public bool inheritedSupportContracts; public int seed; public PlacementDto[] placements; }
         [Serializable] private sealed class PlacementDto { public string placementId; public string elementId; public string assetId; public string role; public Vector3 position; public Vector3 eulerAngles; public Vector3 scale; public bool locked; }
         [Serializable] private sealed class VisualReviewResultDto { public bool passed; public bool advisoryOnly; public VisualQualityScores scores; }
+        [Serializable] private sealed class ConfirmSpatialContractApprovalDto { public bool confirmed; }
         [Serializable] private sealed class SpatialCalibrationInfoDto { public string sessionId; public string subjectName; public string subjectAssetPath; public string targetName; public string template; public string subjectFrameId; public string targetFrameId; public int collisionProxyCount; public int contactRuleCount; public string technicalState; public int technicalErrorCount; public string captureSetHash; public string[] draftPaths; public bool hasAgentProposal; }
-        [Serializable] private sealed class SpatialCaptureResultDto { public string sessionId; public bool technicalPassed; public int technicalErrorCount; public string reportHash; public string captureSetHash; public string[] rawPaths; public string[] evidencePaths; public string[] draftPaths; }
+        [Serializable] private sealed class SpatialCaptureResultDto { public string sessionId; public bool technicalPassed; public int technicalErrorCount; public string reportHash; public string captureSetHash; public string[] rawPaths; public string[] evidencePaths; public string manifestPath; public string[] draftPaths; }
         [Serializable] private sealed class SpatialDraftDto { public string path; public string json; }
         [Serializable] private sealed class SpatialDraftResultDto { public SpatialDraftDto[] drafts; }
         [Serializable] internal sealed class SurfaceArrangementInspectionDto

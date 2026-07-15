@@ -190,6 +190,32 @@ namespace UnityDecoScene.DungeonDecorator
         public List<string> raw_paths = new();
         public List<string> evidence_paths = new();
         public string report_path;
+        public string manifest_path;
+    }
+
+    [Serializable]
+    public sealed class SpatialCaptureProposalBinding
+    {
+        public string contract_type;
+        public string canonical_identity;
+        public string proposal_hash;
+    }
+
+    /// <summary>
+    /// Binds the images shown to a reviewer to the exact semantic proposals that
+    /// produced them. It intentionally contains no mutable review state and no
+    /// capture-set hash, so the manifest itself can participate in that hash.
+    /// </summary>
+    [Serializable]
+    public sealed class SpatialCaptureManifest
+    {
+        public int schema_version = 1;
+        public int manifest_version = 1;
+        public string session_id;
+        public List<SpatialCaptureProposalBinding> proposals = new();
+        public string technical_report_hash;
+        public bool technical_passed;
+        public int technical_error_count;
     }
 
     public static class SpatialContractArrays

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using UnityEditor;
@@ -10,6 +11,40 @@ namespace UnityDecoScene.DungeonDecorator.Tests
 {
     public sealed class McpSurfaceArrangementTests
     {
+        [Test]
+        public void PublicSessionNonceCannotInvokePrivateReviewConfirmations()
+        {
+            McpBridgeHost.Start();
+
+            Assert.That(McpBridgeHost.SessionNonce, Is.Not.Null.And.Not.Empty);
+            Assert.That(McpBridgeHost.ReviewNonce, Is.Not.Null.And.Not.Empty);
+            Assert.That(McpBridgeHost.ReviewNonce, Is.Not.EqualTo(McpBridgeHost.SessionNonce));
+            Assert.That(McpBridgeHost.IsAuthorizedNonce(McpBridgeHost.SessionNonce, "inspect_room"), Is.True);
+            Assert.That(McpBridgeHost.IsAuthorizedNonce(McpBridgeHost.SessionNonce, "confirm_spatial_contract_approval"), Is.False);
+            Assert.That(McpBridgeHost.IsAuthorizedNonce(McpBridgeHost.ReviewNonce, "confirm_spatial_contract_approval"), Is.True);
+            Assert.That(McpBridgeHost.IsAuthorizedNonce(McpBridgeHost.ReviewNonce, "inspect_room"), Is.False);
+        }
+
+        [Test]
+        public void TrustedExecutableResolverRejectsPathLookupAndProjectFiles()
+        {
+            var external = Path.GetTempFileName();
+            var projectLocal = Path.GetFullPath(Path.Combine(Application.dataPath, "../Library/DungeonDecorator/fake-node.exe"));
+            Directory.CreateDirectory(Path.GetDirectoryName(projectLocal));
+            File.WriteAllText(projectLocal, "not an executable");
+            try
+            {
+                Assert.That(SpatialCalibrationWorkflow.ResolveTrustedExecutablePath("node"), Is.Empty);
+                Assert.That(SpatialCalibrationWorkflow.ResolveTrustedExecutablePath(projectLocal), Is.Empty);
+                Assert.That(SpatialCalibrationWorkflow.ResolveTrustedExecutablePath(external), Is.EqualTo(Path.GetFullPath(external)));
+            }
+            finally
+            {
+                File.Delete(projectLocal);
+                File.Delete(external);
+            }
+        }
+
         private readonly List<UnityEngine.Object> cleanup = new();
         private string assetRoot;
         private SpatialCalibrationSession createdSession;

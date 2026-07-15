@@ -9,8 +9,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 {
     /// <summary>
     /// Implements the Spatial Contract v1 normalization and hashing rules used by unity-ctx.
-    /// Hash verification is intentionally local so approved contracts remain safe when the
-    /// optional unity-ctx process is disconnected.
+    /// These local hashes detect stale content. They are not approval authority;
+    /// consumption also requires unity-ctx's external human-review ledger.
     /// </summary>
     public static class SpatialContractHashUtility
     {
@@ -18,7 +18,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             if (asset == null) throw new ArgumentNullException(nameof(asset));
             var json = new StringBuilder(1024);
-            WriteAsset(json, asset, string.Empty);
+            WriteAsset(json, asset, string.Empty, asset.capture_set_hash);
             return Sha256(json.ToString());
         }
 
@@ -26,7 +26,42 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             if (interaction == null) throw new ArgumentNullException(nameof(interaction));
             var json = new StringBuilder(512);
-            WriteInteraction(json, interaction, string.Empty);
+            WriteInteraction(json, interaction, string.Empty, interaction.capture_set_hash);
+            return Sha256(json.ToString());
+        }
+
+        /// <summary>
+        /// Identifies the semantic proposal independently from capture evidence,
+        /// embedded payload hashes, technical state, and human review evidence.
+        /// This is byte-for-byte compatible with unity-ctx ProposalHash.
+        /// </summary>
+        public static string ComputeProposalHash(SpatialContractDocument document)
+        {
+            if (document == null) throw new ArgumentNullException(nameof(document));
+            var json = new StringBuilder(1536);
+            json.Append('{');
+            Property(json, "domain", "unity-ctx-spatial-proposal-v1");
+            json.Append(',');
+            Property(json, "contract_version", Math.Max(1, document.contract_version));
+            json.Append(',');
+            Property(json, "contract_type", document.contract_type ?? string.Empty);
+            if (document.contract_type == "asset" && document.asset != null)
+            {
+                json.Append(',');
+                Name(json, "asset");
+                WriteAsset(json, document.asset, string.Empty, string.Empty);
+            }
+            else if (document.contract_type == "interaction" && document.interaction != null)
+            {
+                json.Append(',');
+                Name(json, "interaction");
+                WriteInteraction(json, document.interaction, string.Empty, string.Empty);
+            }
+            else
+            {
+                throw new ArgumentException("Spatial proposal must contain exactly one payload matching contract_type.", nameof(document));
+            }
+            json.Append('}');
             return Sha256(json.ToString());
         }
 
@@ -44,13 +79,13 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             {
                 json.Append(',');
                 Name(json, "asset");
-                WriteAsset(json, document.asset, ComputeGeometryHash(document.asset));
+                WriteAsset(json, document.asset, ComputeGeometryHash(document.asset), document.asset.capture_set_hash);
             }
             else if (document.contract_type == "interaction" && document.interaction != null)
             {
                 json.Append(',');
                 Name(json, "interaction");
-                WriteInteraction(json, document.interaction, ComputeInteractionHash(document.interaction));
+                WriteInteraction(json, document.interaction, ComputeInteractionHash(document.interaction), document.interaction.capture_set_hash);
             }
             if (document.technical != null)
             {
@@ -123,7 +158,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             return false;
         }
 
-        private static void WriteAsset(StringBuilder json, AssetSpatialContractPayload asset, string geometryHash)
+        private static void WriteAsset(StringBuilder json, AssetSpatialContractPayload asset, string geometryHash, string captureSetHash)
         {
             json.Append('{');
             Property(json, "asset_guid", (asset.asset_guid ?? string.Empty).Trim().ToLowerInvariant());
@@ -142,11 +177,11 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             json.Append(','); Name(json, "contacts"); WriteContacts(json, asset.contacts);
             json.Append(','); Property(json, "revision", Math.Max(1, asset.revision));
             json.Append(','); Property(json, "geometry_hash", geometryHash ?? string.Empty);
-            json.Append(','); Property(json, "capture_set_hash", asset.capture_set_hash ?? string.Empty);
+            json.Append(','); Property(json, "capture_set_hash", captureSetHash ?? string.Empty);
             json.Append('}');
         }
 
-        private static void WriteInteraction(StringBuilder json, InteractionSpatialContractPayload value, string interactionHash)
+        private static void WriteInteraction(StringBuilder json, InteractionSpatialContractPayload value, string interactionHash, string captureSetHash)
         {
             json.Append('{');
             Property(json, "subject_guid", (value.subject_guid ?? string.Empty).Trim().ToLowerInvariant());
@@ -161,7 +196,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             json.Append(','); Property(json, "collision_policy", value.collision_policy ?? string.Empty);
             json.Append(','); Property(json, "revision", Math.Max(1, value.revision));
             json.Append(','); Property(json, "interaction_hash", interactionHash ?? string.Empty);
-            json.Append(','); Property(json, "capture_set_hash", value.capture_set_hash ?? string.Empty);
+            json.Append(','); Property(json, "capture_set_hash", captureSetHash ?? string.Empty);
             json.Append('}');
         }
 

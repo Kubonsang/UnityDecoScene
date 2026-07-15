@@ -103,6 +103,41 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
         }
 
         [Test]
+        public void Float32BoundaryAndLiteralAmpersandHashesMatchUnityCtxVector()
+        {
+            var document = KnownApprovedContract();
+            document.asset.asset_path = "Assets/Props/A&B.prefab";
+            document.asset.pivot_offset[0] = 0.5500005f;
+            document.asset.geometry_hash = SpatialContractHashUtility.ComputeGeometryHash(document.asset);
+
+            Assert.That(document.asset.pivot_offset[0], Is.EqualTo(0.5500005f));
+            Assert.That(document.asset.geometry_hash, Is.EqualTo(
+                "e936d7f62d75993c19bd44ba4bba22dfc9f862c99c85301ccf5e84b51863ad60"));
+            Assert.That(SpatialContractHashUtility.ComputeContentHash(document), Is.EqualTo(
+                "8118e7ac51b8c8167e3fb1c9102a35f1c8bdf2fb0d2fab534ac15b439caaeeca"));
+        }
+
+        [Test]
+        public void Utf16OrderingAndLineSeparatorHashMatchesUnityCtxVector()
+        {
+            var document = KnownApprovedContract();
+            document.asset.dependency_hash = "quoted:\"\u2028:literal:\\u2028:\u2029";
+            var bmp = document.asset.collision_proxies[0];
+            bmp.id = "\ue000";
+            var supplementary = new SpatialObbContract
+            {
+                id = "\U00010000",
+                center = new[] { 0.25f, 0.5f, 0f },
+                size = new[] { 1f, 1f, 1f },
+                rotation = new[] { 0f, 0f, 0f, 1f }
+            };
+            document.asset.collision_proxies = new List<SpatialObbContract> { bmp, supplementary };
+
+            Assert.That(SpatialContractHashUtility.ComputeGeometryHash(document.asset), Is.EqualTo(
+                "1dd4d0e938b2a5bcb8e41ad182ade23b0d2eb8b2dbed3b6118beb4a64df3fae4"));
+        }
+
+        [Test]
         public void LoadPreservesNegativeZeroTokenAndIgnoresStringContents()
         {
             var path = Path.Combine(Path.GetTempPath(), $"spatial-negative-zero-{System.Guid.NewGuid():N}.json");
@@ -144,6 +179,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
             AssetDatabase.DeleteAsset(root);
             Directory.CreateDirectory(Path.GetFullPath(root + "/Contracts"));
             AssetDatabase.Refresh();
+            SpatialContractAuthorityVerifier.TestOverride = (_, _) => null;
             try
             {
                 var source = new GameObject("Contract Sync Prefab");
@@ -180,8 +216,171 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
             }
             finally
             {
+                SpatialContractAuthorityVerifier.TestOverride = null;
                 AssetDatabase.DeleteAsset(root);
                 AssetDatabase.Refresh();
+            }
+        }
+
+        [Test]
+        public void ApprovedAssetImportRejectsPrefabDependencyChangedDuringAuthorityVerification()
+        {
+            const string root = "Assets/__ApprovedContractDependencyRaceTests";
+            AssetDatabase.DeleteAsset(root);
+            Directory.CreateDirectory(Path.GetFullPath(root));
+            AssetDatabase.Refresh();
+            DecorAssetDescriptor descriptor = null;
+            try
+            {
+                var source = new GameObject("Dependency Race Prefab");
+                var prefabPath = root + "/race.prefab";
+                var prefab = PrefabUtility.SaveAsPrefabAsset(source, prefabPath);
+                Object.DestroyImmediate(source);
+                descriptor = ScriptableObject.CreateInstance<DecorAssetDescriptor>();
+                descriptor.InitializeFromScan("dependency-race", prefab, new Bounds(Vector3.zero, Vector3.one), DecorAssetType.Prop);
+
+                var document = KnownApprovedContract();
+                document.asset.asset_guid = AssetDatabase.AssetPathToGUID(prefabPath);
+                document.asset.asset_path = prefabPath;
+                document.asset.dependency_hash = AssetDatabase.GetAssetDependencyHash(prefabPath).ToString();
+                document.asset.geometry_hash = SpatialContractHashUtility.ComputeGeometryHash(document.asset);
+                document.review.contract_hash = SpatialContractHashUtility.ComputeContentHash(document);
+                var contractPath = Path.GetFullPath(root + "/race.spatial.json");
+                File.WriteAllText(contractPath, SpatialContractIO.SerializeForStorage(document));
+
+                SpatialContractAuthorityVerifier.TestOverride = (_, _) =>
+                {
+                    var contents = PrefabUtility.LoadPrefabContents(prefabPath);
+                    contents.AddComponent<BoxCollider>();
+                    PrefabUtility.SaveAsPrefabAsset(contents, prefabPath);
+                    PrefabUtility.UnloadPrefabContents(contents);
+                    AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceSynchronousImport);
+                    return null;
+                };
+
+                Assert.That(SpatialContractIO.TryCreateApprovedGeometry(
+                    contractPath, descriptor, out _, out var reason), Is.False);
+                Assert.That(reason, Does.StartWith("CONTRACT_AUTHORITY_CHANGED prefab identity or dependency changed"));
+            }
+            finally
+            {
+                SpatialContractAuthorityVerifier.TestOverride = null;
+                if (descriptor != null) Object.DestroyImmediate(descriptor);
+                AssetDatabase.DeleteAsset(root);
+                AssetDatabase.Refresh();
+            }
+        }
+
+        [Test]
+        public void InteractionCatalogRejectsSelfAssertedApprovedBinding()
+        {
+            const string subjectGuid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            const string targetGuid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+            var document = KnownApprovedInteractionContract(subjectGuid, targetGuid);
+            var catalog = new SupportContractCatalog();
+            catalog.RegisterAsset(new SupportAssetIdentity("book", subjectGuid, "book-geometry", "book-geometry"));
+            catalog.RegisterAsset(new SupportAssetIdentity("table", targetGuid, "table-geometry", "table-geometry"));
+
+            var binding = new SupportInteractionBinding(
+                document, "book", "table", "book-geometry", "table-geometry");
+
+            Assert.That(catalog.RegisterApprovedInteraction(binding, out var reason), Is.False);
+            Assert.That(reason, Does.StartWith("CONTRACT_AUTHORITY_REQUIRED"));
+        }
+
+        [Test]
+        public void ApprovedInteractionLoaderCarriesAuthorityAndCatalogClonesPose()
+        {
+            const string subjectGuid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            const string targetGuid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+            var subjectGeometryHash = new string('c', 64);
+            var targetGeometryHash = new string('d', 64);
+            var document = KnownApprovedInteractionContract(subjectGuid, targetGuid);
+            var path = Path.Combine(Path.GetTempPath(), $"approved-interaction-{System.Guid.NewGuid():N}.interaction.json");
+            File.WriteAllText(path, SpatialContractIO.SerializeForStorage(document));
+            SpatialContractAuthorityVerifier.TestEvidenceOverride = (actualPath, expectedHash) =>
+            {
+                Assert.That(actualPath, Is.EqualTo(Path.GetFullPath(path)));
+                Assert.That(expectedHash, Is.EqualTo(SpatialContractHashUtility.ComputeContentHash(document)));
+                return new SpatialContractAuthorityEvidence
+                {
+                    authorized = true,
+                    contract_hash = expectedHash,
+                    contract_type = "interaction",
+                    subject_guid = subjectGuid,
+                    target_key = "asset:" + targetGuid,
+                    subject_geometry_hash = subjectGeometryHash,
+                    target_geometry_hash = targetGeometryHash
+                };
+            };
+            try
+            {
+                Assert.That(SpatialContractIO.TryLoadApprovedInteractionBinding(
+                    path, "book", "table",
+                    out var binding, out var loadReason), Is.True, loadReason);
+                Assert.That(binding.AuthorityVerified, Is.True);
+                Assert.That(binding.SubjectGeometryHash, Is.EqualTo(subjectGeometryHash));
+                Assert.That(binding.TargetGeometryHash, Is.EqualTo(targetGeometryHash));
+
+                var catalog = new SupportContractCatalog();
+                catalog.RegisterAsset(new SupportAssetIdentity("book", subjectGuid, subjectGeometryHash, subjectGeometryHash));
+                catalog.RegisterAsset(new SupportAssetIdentity("table", targetGuid, targetGeometryHash, targetGeometryHash));
+                Assert.That(catalog.RegisterApprovedInteraction(binding, out var registerReason), Is.True, registerReason);
+                Assert.That(catalog.TryResolve("book", "table", out var before, out var code), Is.True, code);
+                var approvedX = before.Interaction.relative_position[0];
+
+                binding.Document.review.comment = "tampered after verification";
+                Assert.That(catalog.RegisterApprovedInteraction(binding, out registerReason), Is.False);
+                Assert.That(registerReason, Does.StartWith("CONTRACT_AUTHORITY_CHANGED"));
+                binding.Document.interaction.relative_position[0] = approvedX + 2f;
+
+                Assert.That(catalog.TryResolve("book", "table", out var after, out code), Is.True, code);
+                Assert.That(after.Interaction.relative_position[0], Is.EqualTo(approvedX),
+                    "Catalog registration must snapshot the authority-verified pose instead of retaining a mutable document reference.");
+            }
+            finally
+            {
+                SpatialContractAuthorityVerifier.TestEvidenceOverride = null;
+                if (File.Exists(path)) File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void ApprovedInteractionLoaderRejectsAuthorityVerificationRace()
+        {
+            const string subjectGuid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            const string targetGuid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+            var document = KnownApprovedInteractionContract(subjectGuid, targetGuid);
+            var path = Path.Combine(Path.GetTempPath(), $"stale-interaction-{System.Guid.NewGuid():N}.interaction.json");
+            File.WriteAllText(path, SpatialContractIO.SerializeForStorage(document));
+            SpatialContractAuthorityVerifier.TestEvidenceOverride = (_, expectedHash) =>
+            {
+                var replacement = KnownApprovedInteractionContract(subjectGuid, targetGuid);
+                replacement.review.reviewer = "other-user";
+                replacement.review.contract_hash = SpatialContractHashUtility.ComputeContentHash(replacement);
+                File.WriteAllText(path, SpatialContractIO.SerializeForStorage(replacement));
+                return new SpatialContractAuthorityEvidence
+                {
+                    authorized = true,
+                    contract_hash = expectedHash,
+                    contract_type = "interaction",
+                    subject_guid = subjectGuid,
+                    target_key = "asset:" + targetGuid,
+                    subject_geometry_hash = new string('c', 64),
+                    target_geometry_hash = new string('d', 64)
+                };
+            };
+            try
+            {
+                Assert.That(SpatialContractIO.TryLoadApprovedInteractionBinding(
+                    path, "book", "table",
+                    out _, out var reason), Is.False);
+                Assert.That(reason, Does.StartWith("CONTRACT_AUTHORITY_CHANGED"));
+            }
+            finally
+            {
+                SpatialContractAuthorityVerifier.TestEvidenceOverride = null;
+                if (File.Exists(path)) File.Delete(path);
             }
         }
 
@@ -198,12 +397,17 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
             targetMesh.transform.localScale = new Vector3(2f, 0.5f, 1.5f);
             var descriptor = ScriptableObject.CreateInstance<DecorAssetDescriptor>();
             IReadOnlyList<string> paths = null;
+            SpatialCaptureSet captures = null;
+            var subjectPrefabPath = $"Assets/__spatial-subject-{System.Guid.NewGuid():N}.prefab";
+            var targetPrefabPath = $"Assets/__spatial-target-{System.Guid.NewGuid():N}.prefab";
             try
             {
-                descriptor.InitializeFromScan("flat-book", subject,
+                var subjectPrefab = PrefabUtility.SaveAsPrefabAsset(subject, subjectPrefabPath);
+                var targetPrefab = PrefabUtility.SaveAsPrefabAsset(target, targetPrefabPath);
+                descriptor.InitializeFromScan("flat-book", subjectPrefab,
                     new Bounds(Vector3.zero, new Vector3(0.2f, 0.5f, 0.355f)), DecorAssetType.Prop);
                 var session = SpatialCalibrationSession.Begin(
-                    descriptor, target, SpatialCalibrationTemplate.SupportedBy, "flat", "top");
+                    descriptor, targetPrefab, SpatialCalibrationTemplate.SupportedBy, "flat", "top");
                 try
                 {
                     Assert.That(session.Rules.Single().frame_id, Is.EqualTo("flat"));
@@ -215,11 +419,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
                         "Flat intent must put the reviewed compound OBB's thinnest axis in world Y.");
                     var report = SpatialCalibrationValidator.Validate(session);
                     Assert.That(report.error_count, Is.Zero, string.Join("\n", report.errors));
-                    paths = SpatialContractIO.WriteDrafts(session, report, new SpatialCaptureSet
-                    {
-                        session_id = session.SessionId,
-                        capture_set_hash = "flat-capture"
-                    });
+                    captures = CreateCaptureEvidence(session.SessionId, report);
+                    paths = SpatialContractIO.WriteDrafts(session, report, captures);
                     var interaction = SpatialContractIO.Load(paths.Single(path => path.EndsWith(".interaction.json")));
                     Assert.That(interaction.interaction.subject_frame, Is.EqualTo("flat"));
                     Assert.That(interaction.interaction.target_frame, Is.EqualTo("top"));
@@ -233,6 +434,9 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
             finally
             {
                 foreach (var path in paths ?? System.Array.Empty<string>()) File.Delete(path);
+                DeleteCaptureEvidence(captures);
+                AssetDatabase.DeleteAsset(subjectPrefabPath);
+                AssetDatabase.DeleteAsset(targetPrefabPath);
                 Object.DestroyImmediate(descriptor);
                 Object.DestroyImmediate(subject);
                 Object.DestroyImmediate(target);
@@ -247,21 +451,22 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
             var descriptor = ScriptableObject.CreateInstance<DecorAssetDescriptor>();
             string path = null;
             string supersededAssetPath = null;
+            SpatialCaptureSet captures = null;
+            var subjectPrefabPath = $"Assets/__spatial-subject-{System.Guid.NewGuid():N}.prefab";
+            var targetPrefabPath = $"Assets/__spatial-target-{System.Guid.NewGuid():N}.prefab";
             try
             {
-                descriptor.InitializeFromScan("interaction-only", subject,
+                var subjectPrefab = PrefabUtility.SaveAsPrefabAsset(subject, subjectPrefabPath);
+                var targetPrefab = PrefabUtility.SaveAsPrefabAsset(target, targetPrefabPath);
+                descriptor.InitializeFromScan("interaction-only", subjectPrefab,
                     new Bounds(Vector3.zero, Vector3.one), DecorAssetType.Prop);
                 var session = SpatialCalibrationSession.Begin(
-                    descriptor, target, SpatialCalibrationTemplate.SupportedBy, "bottom", "top");
+                    descriptor, targetPrefab, SpatialCalibrationTemplate.SupportedBy, "bottom", "top");
                 try
                 {
                     var report = SpatialCalibrationValidator.Validate(session);
                     Assert.That(report.error_count, Is.Zero, string.Join("\n", report.errors));
-                    var captures = new SpatialCaptureSet
-                    {
-                        session_id = session.SessionId,
-                        capture_set_hash = "interaction-only-capture"
-                    };
+                    captures = CreateCaptureEvidence(session.SessionId, report);
                     var previousDrafts = SpatialContractIO.WriteDrafts(session, report, captures);
                     supersededAssetPath = previousDrafts.Single(value => value.EndsWith(".spatial.json", System.StringComparison.OrdinalIgnoreCase));
                     Assert.That(File.Exists(supersededAssetPath), Is.True, "The reuse case must begin with an older asset draft.");
@@ -279,10 +484,40 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
             {
                 if (!string.IsNullOrWhiteSpace(path)) File.Delete(path);
                 if (!string.IsNullOrWhiteSpace(supersededAssetPath)) File.Delete(supersededAssetPath);
+                DeleteCaptureEvidence(captures);
+                AssetDatabase.DeleteAsset(subjectPrefabPath);
+                AssetDatabase.DeleteAsset(targetPrefabPath);
                 Object.DestroyImmediate(descriptor);
                 Object.DestroyImmediate(subject);
                 Object.DestroyImmediate(target);
             }
+        }
+
+        private static SpatialCaptureSet CreateCaptureEvidence(string sessionId, SpatialCalibrationReport report)
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "spatial-contract-capture-" + System.Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            var rawNames = new[] { "front.png", "side.png", "top.png", "contact.png" };
+            var evidenceNames = new[] { "front-evidence.png", "side-evidence.png", "top-evidence.png", "contact-evidence.png" };
+            foreach (var name in rawNames.Concat(evidenceNames))
+                File.WriteAllBytes(Path.Combine(directory, name), new byte[] { 1, 2, 3, (byte)name.Length });
+            var reportPath = Path.Combine(directory, "technical-report.json");
+            File.WriteAllText(reportPath, JsonUtility.ToJson(report, true));
+            return new SpatialCaptureSet
+            {
+                session_id = sessionId,
+                raw_paths = rawNames.Select(name => Path.Combine(directory, name)).ToList(),
+                evidence_paths = evidenceNames.Select(name => Path.Combine(directory, name)).ToList(),
+                report_path = reportPath,
+                manifest_path = Path.Combine(directory, "capture-manifest.json")
+            };
+        }
+
+        private static void DeleteCaptureEvidence(SpatialCaptureSet captures)
+        {
+            if (string.IsNullOrWhiteSpace(captures?.report_path)) return;
+            var directory = Path.GetDirectoryName(captures.report_path);
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory)) Directory.Delete(directory, true);
         }
 
         private static SpatialContractDocument KnownApprovedContract()
@@ -329,6 +564,42 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
                     revision = 1
                 }
             };
+        }
+
+        private static SpatialContractDocument KnownApprovedInteractionContract(string subjectGuid, string targetGuid)
+        {
+            var document = new SpatialContractDocument
+            {
+                contract_version = 1,
+                contract_type = "interaction",
+                state = SpatialContractStates.Approved,
+                interaction = new InteractionSpatialContractPayload
+                {
+                    subject_guid = subjectGuid,
+                    target_key = "asset:" + targetGuid,
+                    relation = "SupportedBy",
+                    subject_frame = "back",
+                    target_frame = "top",
+                    relative_position = new[] { 0.1f, 1f, 0.2f },
+                    relative_rotation = new[] { -0.7071068f, 0f, 0f, 0.7071068f },
+                    position_tolerance = new[] { 0.2f, 0.01f, 0.2f },
+                    angle_tolerance = 180f,
+                    collision_policy = "contact-only",
+                    revision = 1,
+                    capture_set_hash = "capture"
+                },
+                technical = new SpatialTechnicalEvidence { passed = true, error_count = 0, report_hash = "report" },
+                review = new SpatialHumanReview
+                {
+                    decision = SpatialContractStates.Approved,
+                    capture_set_hash = "capture",
+                    reviewer = "local-user",
+                    revision = 1
+                }
+            };
+            document.interaction.interaction_hash = SpatialContractHashUtility.ComputeInteractionHash(document.interaction);
+            document.review.contract_hash = SpatialContractHashUtility.ComputeContentHash(document);
+            return document;
         }
 
         private static SpatialContractDocument KnownApprovedNegativeZeroTableContract()

@@ -148,7 +148,7 @@
 </header>
 <main><div id="app"></div></main>
 <script>
-let workflow=__WORKFLOW_JSON__;
+let workflow=__WORKFLOW_JSON__||{schemaVersion:1,status:'Pending',items:[]};
 const generated="__GENERATED_UTC__";
 const views=[['front','정면'],['side','측면'],['top','상단'],['contact','접촉 확대']];
 const reviewed=new Set();
@@ -175,7 +175,7 @@ const reviewKind=item=>item.reviewKind||'asset';
 const familyKey=item=>item.reviewGroupKey
   ?[reviewKind(item),item.reviewGroupKey,item.status].join('|')
   :[reviewKind(item),item.arrangementEvidence?.arrangementId||'',item.geometryFamilyHash||`single:${item.id}`,item.template||'',item.status].join('|');
-const imageUrl=(item,index,evidence)=>location.protocol==='file:'?toFileUrl((evidence?item.evidencePaths:item.rawPaths)[index]):`/api/spatial/workflow/image/${encodeURIComponent(item.id)}/${views[index][0]}?evidence=${evidence?1:0}&hash=${item.captureHash}`;
+const imageUrl=(item,index,evidence)=>location.protocol==='file:'?toFileUrl((evidence?item.evidencePaths:item.rawPaths)[index]):`/api/spatial/workflow/image/${encodeURIComponent(item.id)}/${views[index][0]}?evidence=${evidence?1:0}&hash=${encodeURIComponent(item.captureHash||'')}`;
 
 function reviewGroups(){
   const reviewable=workflow.items.filter(item=>reviewableStatus.has(item.status));
@@ -265,7 +265,7 @@ function detail(group){
     ${family}
     ${revisionHistory(item)}
     ${arrangementEvidence(item)}
-    <div class="grid">${displayViews.map(([id,label],index)=>`<figure class="view"><figcaption>${label}</figcaption><img src="${imageUrl(item,index,evidenceMode)}" alt="${label}"></figure>`).join('')}</div>
+    <div class="grid">${displayViews.map(([id,label],index)=>`<figure class="view"><figcaption>${label}</figcaption><img src="${escapeHtml(imageUrl(item,index,evidenceMode))}" alt="${label}"></figure>`).join('')}</div>
     <div class="measurements">${metrics(item)}</div>
     <p class="notice">${item.status==='TechnicalFailed'?(item.errors||[]).map(escapeHtml).join(' · '):`대기 계약 ${group.items.length}개 · 형상 ${escapeHtml(String(item.geometryFamilyHash||'개별').slice(0,15))} · 캡처 ${escapeHtml(String(item.captureHash||'').slice(0,8))}`}</p>
   </section>`;
@@ -315,9 +315,7 @@ async function connect(){
   const state=document.querySelector('#header-state');
   for(let i=0;i<12;i++){
     try{
-      const health=await fetch('http://127.0.0.1:4174/api/health');
-      if(health.ok){
-        const value=await health.json();nonce=value.nonce||'';
+      if(await freshNonce()){
         const latest=await fetch('http://127.0.0.1:4174/api/spatial/workflow');
         if(latest.ok){workflow=await latest.json();hydrateReviewHistory(workflow);}
         render();return;
@@ -328,6 +326,18 @@ async function connect(){
   }
   state.textContent='로컬 브리지 연결 안 됨';render();
 }
+async function freshNonce(){
+  const health=await fetch('http://127.0.0.1:4174/api/health',{cache:'no-store'});
+  const value=await health.json();
+  if(!health.ok||!value.nonce)throw new Error(value.error||'로컬 검수 브리지에서 승인 토큰을 받지 못했습니다.');
+  nonce=value.nonce;return nonce;
+}
+async function reloadWorkflow(){
+  const response=await fetch('http://127.0.0.1:4174/api/spatial/workflow',{cache:'no-store'});
+  const value=await response.json();
+  if(!response.ok)throw new Error(value.error||'최신 검수 상태를 불러오지 못했습니다.');
+  workflow=value;hydrateReviewHistory(workflow);return workflow;
+}
 async function decide(groupId,decision){
   const group=reviewGroups().find(value=>value.id===groupId);
   if(!group||!nonce)return;
@@ -337,11 +347,12 @@ async function decide(groupId,decision){
   const buttons=document.querySelectorAll('.action-bar button,.action-bar input');buttons.forEach(control=>control.disabled=true);
   try{
     for(const item of group.items){
+      await freshNonce();
       const response=await fetch('http://127.0.0.1:4174/api/spatial/workflow/review',{method:'POST',headers:{'Content-Type':'application/json','X-Spatial-Review-Nonce':nonce},body:JSON.stringify({id:item.id,decision,captureHash:item.captureHash,reviewer:localStorage.getItem('spatial-reviewer')||'local-user',issues,comment:comment||'동일 형상군 사용자 판정'})});
       const result=await response.json();if(!response.ok)throw new Error(result.error||'판정 저장 실패');item.status=result.status;item.comment=comment;item.revisionIssueCodes=issues;
     }
     decisions.delete(groupId);reviewed.delete(groupId);comments.delete(groupId);actionMessage='';render();
-  }catch(error){alert(error.message);render();}
+  }catch(error){try{await reloadWorkflow()}catch{}alert(error.message);render();}
 }
 async function bulkApprove(){
   const groups=reviewGroups();
@@ -349,12 +360,13 @@ async function bulkApprove(){
   if(!awaitingGroups.length||awaitingGroups.some(group=>decisions.get(group.id)!=='Approved')||!nonce)return;
   const button=document.querySelector('#finalize');button.disabled=true;button.textContent='최종 저장 중…';
   try{
+    await freshNonce();
     const items=awaitingGroups.flatMap(group=>group.items.map(item=>({id:item.id,captureHash:item.captureHash})));
     const response=await fetch('http://127.0.0.1:4174/api/spatial/workflow/review-batch',{method:'POST',headers:{'Content-Type':'application/json','X-Spatial-Review-Nonce':nonce},body:JSON.stringify({decision:'Approved',reviewer:localStorage.getItem('spatial-reviewer')||'local-user',items,comment:'각 형상군의 4뷰 확인 및 승인 예정 판정 후 최종 저장.'})});
-    const result=await response.json();if(!response.ok)throw new Error(result.error||'일괄 승인 저장 실패');
-    const ids=new Set(items.map(item=>item.id));workflow.items.filter(item=>ids.has(item.id)).forEach(item=>item.status='Approved');
+    const result=await response.json();await reloadWorkflow();if(!response.ok)throw new Error(result.error||'일괄 승인 저장 실패');
+    if(result.status!=='Approved')throw new Error(`일괄 저장이 ${result.count||0}개에서 중단되었습니다. 최신 상태를 불러왔습니다. ${result.error||''}`.trim());
     awaitingGroups.forEach(group=>{decisions.delete(group.id);reviewed.delete(group.id)});render();
-  }catch(error){alert(error.message);render();}
+  }catch(error){try{await reloadWorkflow()}catch{}alert(error.message);render();}
 }
 hydrateReviewHistory(workflow);render();connect();
 </script>
