@@ -19,6 +19,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
     public static class SpatialCalibrationReviewKinds
     {
         public const string Asset = "asset";
+        public const string Interaction = "interaction";
         public const string Arrangement = "arrangement";
     }
 
@@ -60,6 +61,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string dependencyHash;
         public string geometryFamilyHash;
         public string geometryFamilyCanonicalId;
+        public string reviewGroupKey;
+        public string interactionSignature;
         public string template;
         public string relationSource;
         public string suggestedTemplate;

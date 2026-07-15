@@ -12,11 +12,10 @@ namespace UnityDecoScene.DungeonDecorator.Editor
     {
         public static IReadOnlyList<string> WriteDrafts(SpatialCalibrationSession session, SpatialCalibrationReport report, SpatialCaptureSet captures)
         {
-            if (session == null || report == null || captures == null) throw new ArgumentNullException("Session, report, and captures are required.");
+            ValidateDraftInputs(session, report, captures);
             var prefabPath = AssetDatabase.GetAssetPath(session.Descriptor.Prefab);
             var guid = AssetDatabase.AssetPathToGUID(prefabPath);
-            var directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Library/DungeonDecorator/SpatialDrafts"));
-            Directory.CreateDirectory(directory);
+            var directory = DraftDirectory();
             session.DraftPaths.Clear();
 
             var assetDocument = CreateAssetDocument(session, report, captures, prefabPath, guid);
@@ -26,12 +25,27 @@ namespace UnityDecoScene.DungeonDecorator.Editor
 
             if (session.Template == SpatialCalibrationTemplate.SupportedBy && session.TargetPrefab != null)
             {
-                var interaction = CreateInteractionDocument(session, report, captures, guid);
-                var interactionDraft = Path.Combine(directory, session.SessionId + ".interaction.json");
-                WriteJson(interactionDraft, interaction);
+                var interactionDraft = WriteInteractionDraftCore(session, report, captures, guid, directory);
                 session.DraftPaths.Add(interactionDraft);
             }
             return session.DraftPaths;
+        }
+
+        /// <summary>Writes one SupportedBy interaction draft and no asset geometry draft.</summary>
+        public static string WriteInteractionDraft(SpatialCalibrationSession session, SpatialCalibrationReport report, SpatialCaptureSet captures)
+        {
+            ValidateDraftInputs(session, report, captures);
+            if (session.Template != SpatialCalibrationTemplate.SupportedBy || session.TargetPrefab == null)
+                throw new InvalidOperationException("Interaction-only drafts require a SupportedBy session with a target prefab.");
+            var prefabPath = AssetDatabase.GetAssetPath(session.Descriptor.Prefab);
+            var guid = AssetDatabase.AssetPathToGUID(prefabPath);
+            session.DraftPaths.Clear();
+            var directory = DraftDirectory();
+            var supersededAssetDraft = Path.Combine(directory, session.SessionId + ".spatial.json");
+            if (File.Exists(supersededAssetDraft)) File.Delete(supersededAssetDraft);
+            var path = WriteInteractionDraftCore(session, report, captures, guid, directory);
+            session.DraftPaths.Add(path);
+            return path;
         }
 
         public static SpatialContractDocument Load(string path)
@@ -108,6 +122,32 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         }
 
         public static string ApprovedAssetPath(string assetGuid) => $"Assets/SpatialContracts/Assets/{assetGuid}.spatial.json";
+
+        private static string WriteInteractionDraftCore(
+            SpatialCalibrationSession session,
+            SpatialCalibrationReport report,
+            SpatialCaptureSet captures,
+            string subjectGuid,
+            string directory)
+        {
+            var document = CreateInteractionDocument(session, report, captures, subjectGuid);
+            var path = Path.Combine(directory, session.SessionId + ".interaction.json");
+            WriteJson(path, document);
+            return path;
+        }
+
+        private static string DraftDirectory()
+        {
+            var directory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Library/DungeonDecorator/SpatialDrafts"));
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+
+        private static void ValidateDraftInputs(SpatialCalibrationSession session, SpatialCalibrationReport report, SpatialCaptureSet captures)
+        {
+            if (session == null || report == null || captures == null)
+                throw new ArgumentNullException("Session, report, and captures are required.");
+        }
 
         private static SpatialContractDocument CreateAssetDocument(SpatialCalibrationSession session, SpatialCalibrationReport report, SpatialCaptureSet captures, string prefabPath, string guid)
         {

@@ -172,7 +172,9 @@ const arrangementIssueLabels=[
 const toFileUrl=p=>'file:///'+encodeURI(String(p||'').replaceAll('\\','/'));
 const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const reviewKind=item=>item.reviewKind||'asset';
-const familyKey=item=>[reviewKind(item),item.arrangementEvidence?.arrangementId||'',item.geometryFamilyHash||`single:${item.id}`,item.template||'',item.status].join('|');
+const familyKey=item=>item.reviewGroupKey
+  ?[reviewKind(item),item.reviewGroupKey,item.status].join('|')
+  :[reviewKind(item),item.arrangementEvidence?.arrangementId||'',item.geometryFamilyHash||`single:${item.id}`,item.template||'',item.status].join('|');
 const imageUrl=(item,index,evidence)=>location.protocol==='file:'?toFileUrl((evidence?item.evidencePaths:item.rawPaths)[index]):`/api/spatial/workflow/image/${encodeURIComponent(item.id)}/${views[index][0]}?evidence=${evidence?1:0}&hash=${item.captureHash}`;
 
 function reviewGroups(){
@@ -185,6 +187,7 @@ function reviewGroups(){
 function familyMembers(group){
   const item=group.representative;
   if(reviewKind(item)==='arrangement')return group.items;
+  if(reviewKind(item)==='interaction'&&item.reviewGroupKey)return workflow.items.filter(value=>value.reviewGroupKey===item.reviewGroupKey);
   if(!item.geometryFamilyHash)return group.items;
   return workflow.items.filter(value=>value.geometryFamilyHash===item.geometryFamilyHash&&value.template===item.template);
 }

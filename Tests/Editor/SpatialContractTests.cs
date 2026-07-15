@@ -192,6 +192,52 @@ namespace UnityDecoScene.DungeonDecorator.Editor.Tests
             }
         }
 
+        [Test]
+        public void InteractionOnlyWriterCreatesNoAssetGeometryDraft()
+        {
+            var subject = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var target = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var descriptor = ScriptableObject.CreateInstance<DecorAssetDescriptor>();
+            string path = null;
+            string supersededAssetPath = null;
+            try
+            {
+                descriptor.InitializeFromScan("interaction-only", subject,
+                    new Bounds(Vector3.zero, Vector3.one), DecorAssetType.Prop);
+                var session = SpatialCalibrationSession.Begin(
+                    descriptor, target, SpatialCalibrationTemplate.SupportedBy, "bottom", "top");
+                try
+                {
+                    var report = SpatialCalibrationValidator.Validate(session);
+                    Assert.That(report.error_count, Is.Zero, string.Join("\n", report.errors));
+                    var captures = new SpatialCaptureSet
+                    {
+                        session_id = session.SessionId,
+                        capture_set_hash = "interaction-only-capture"
+                    };
+                    var previousDrafts = SpatialContractIO.WriteDrafts(session, report, captures);
+                    supersededAssetPath = previousDrafts.Single(value => value.EndsWith(".spatial.json", System.StringComparison.OrdinalIgnoreCase));
+                    Assert.That(File.Exists(supersededAssetPath), Is.True, "The reuse case must begin with an older asset draft.");
+
+                    path = SpatialContractIO.WriteInteractionDraft(session, report, captures);
+
+                    Assert.That(session.DraftPaths, Is.EqualTo(new[] { path }));
+                    Assert.That(path, Does.EndWith(".interaction.json"));
+                    Assert.That(File.Exists(supersededAssetPath), Is.False, "Interaction-only rewrite must retire the same-session asset draft.");
+                    Assert.That(SpatialContractIO.Load(path).contract_type, Is.EqualTo("interaction"));
+                }
+                finally { session.Dispose(); }
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(path)) File.Delete(path);
+                if (!string.IsNullOrWhiteSpace(supersededAssetPath)) File.Delete(supersededAssetPath);
+                Object.DestroyImmediate(descriptor);
+                Object.DestroyImmediate(subject);
+                Object.DestroyImmediate(target);
+            }
+        }
+
         private static SpatialContractDocument KnownApprovedContract()
         {
             var asset = new AssetSpatialContractPayload

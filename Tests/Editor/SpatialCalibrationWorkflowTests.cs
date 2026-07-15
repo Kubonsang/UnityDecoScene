@@ -266,6 +266,58 @@ namespace UnityDecoScene.DungeonDecorator.Tests
         }
 
         [Test]
+        public void SameGeometryFamilyDifferentSupportedBySignaturesHaveIndependentReviewGroups()
+        {
+            var table = new InteractionSpatialContractPayload
+            {
+                subject_guid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                target_key = "asset:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                relation = "SupportedBy",
+                subject_frame = "back",
+                target_frame = "top",
+                relative_position = new[] { 0f, 1f, 0f },
+                relative_rotation = new[] { -0.7071068f, 0f, 0f, 0.7071068f }
+            };
+            var stack = new InteractionSpatialContractPayload
+            {
+                subject_guid = table.subject_guid,
+                target_key = "asset:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                relation = table.relation,
+                subject_frame = table.subject_frame,
+                target_frame = table.target_frame,
+                relative_position = new[] { 0f, 0.2f, 0f },
+                relative_rotation = (float[])table.relative_rotation.Clone()
+            };
+            var materialVariant = new InteractionSpatialContractPayload
+            {
+                subject_guid = "cccccccccccccccccccccccccccccccc",
+                target_key = table.target_key,
+                relation = table.relation,
+                subject_frame = table.subject_frame,
+                target_frame = table.target_frame,
+                relative_position = (float[])table.relative_position.Clone(),
+                relative_rotation = (float[])table.relative_rotation.Clone(),
+                revision = 7
+            };
+
+            var tableGroup = SpatialCalibrationReviewIdentity.BuildInteractionReviewGroupKey("book-family", table);
+            var stackGroup = SpatialCalibrationReviewIdentity.BuildInteractionReviewGroupKey("book-family", stack);
+            var variantGroup = SpatialCalibrationReviewIdentity.BuildInteractionReviewGroupKey("book-family", materialVariant);
+
+            Assert.That(stackGroup, Is.Not.EqualTo(tableGroup));
+            Assert.That(variantGroup, Is.EqualTo(tableGroup), "Subject GUID must not split material-only geometry aliases.");
+        }
+
+        [Test]
+        public void ReviewTemplatePrefersExplicitInteractionReviewGroupKey()
+        {
+            var template = System.IO.File.ReadAllText(
+                "Packages/com.unitydecoscene.dungeon-decorator/Editor/Spatial/Templates/CalibrationReviewTemplate.html");
+            Assert.That(template, Does.Contain("item.reviewGroupKey"));
+            Assert.That(template, Does.Contain("reviewKind(item)==='interaction'"));
+        }
+
+        [Test]
         public void ArrangementProposalLivesOnlyInEditorSessionState()
         {
             SurfaceArrangementProposalStore.Clear();
