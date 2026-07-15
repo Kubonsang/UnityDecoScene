@@ -11,10 +11,19 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public const string CornerA = "corner-a";
         public const string CornerB = "corner-b";
         public const string WallContactSidePrefix = "wall-contact-side-";
+        public const string SurfaceArrangementPrefix = "surface-arrangement-";
+        public const string ArrangementOverviewSuffix = "-overview";
+        public const string ArrangementTopSuffix = "-top";
+        public const string ArrangementSideSuffix = "-side";
+        public const string ArrangementContactSuffix = "-contact";
 
         public static bool IsWallContactSide(string viewId) =>
             !string.IsNullOrWhiteSpace(viewId) &&
             viewId.StartsWith(WallContactSidePrefix, StringComparison.Ordinal);
+
+        public static bool IsSurfaceArrangement(string viewId) =>
+            !string.IsNullOrWhiteSpace(viewId) &&
+            viewId.StartsWith(SurfaceArrangementPrefix, StringComparison.Ordinal);
     }
 
     [Serializable]

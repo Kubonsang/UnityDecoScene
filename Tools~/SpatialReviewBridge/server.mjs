@@ -359,6 +359,22 @@ function loadCurrentRoomReview() {
 }
 
 function publicRoomReviewState(state, roomKey) {
+  const arrangements = Array.isArray(state.arrangementEvidence) ? state.arrangementEvidence.map(value => ({
+    arrangementId: String(value?.arrangementId || ""),
+    targetElementId: String(value?.targetElementId || ""),
+    targetFrameId: String(value?.targetFrameId || "top"),
+    preset: String(value?.preset || ""),
+    memberCount: Number(value?.memberCount || 0),
+    stackCount: Number(value?.stackCount || 0),
+    maximumStackLevel: Number(value?.maximumStackLevel || 0),
+    minimumSupport: Number(value?.minimumSupport || 0),
+    minimumEdgeDistance: Number(value?.minimumEdgeDistance || 0),
+    specHash: String(value?.specHash || ""),
+    placementHash: String(value?.placementHash || ""),
+    stackStructure: Array.isArray(value?.stackStructure) ? value.stackStructure.map(String) : [],
+    errorCodes: Array.isArray(value?.errorCodes) ? value.errorCodes.map(String) : [],
+    captureViewIds: Array.isArray(value?.captureViewIds) ? value.captureViewIds.map(String) : [],
+  })) : [];
   return {
     schemaVersion: state.schemaVersion,
     roomKey,
@@ -377,10 +393,12 @@ function publicRoomReviewState(state, roomKey) {
     technicalIssues: Array.isArray(state.technicalErrorCodes) ? state.technicalErrorCodes : [],
     changeSummary: roomChangeSummary(state.changes),
     changeScope: state.changes?.scope ?? 0,
+    arrangements,
     captures: (state.capture?.views || []).map(capture => ({
       view: String(capture?.id || ""),
       label: roomCaptureLabel(capture?.id),
       required: capture?.required !== false,
+      arrangementId: arrangements.find(value => value.captureViewIds.includes(String(capture?.id || "")))?.arrangementId || "",
     })),
     review: state.decision && state.decision.value && state.decision.value !== "Pending" ? {
       decision: state.decision.value,
@@ -429,8 +447,17 @@ function roomCaptureHash(state) {
 }
 
 function roomCaptureLabel(id) {
-  return ({ top: "상단", entrance: "입구 시점", "primary-observation": "입구 시점", "corner-a": "첫 번째 모서리", "corner-b": "두 번째 모서리" })[id]
-    || String(id || "캡처");
+  const fixed = ({ top: "방 전체 · 상단", entrance: "방 전체 · 입구 시점", "primary-observation": "방 전체 · 입구 시점", "corner-a": "방 전체 · 첫 번째 모서리", "corner-b": "방 전체 · 두 번째 모서리" })[id];
+  if (fixed) return fixed;
+  const value = String(id || "");
+  if (value.startsWith("surface-arrangement-")) {
+    if (value.endsWith("-overview")) return "탁자 연출 · 사선 전경";
+    if (value.endsWith("-top")) return "탁자 연출 · 상단";
+    if (value.endsWith("-side")) return "탁자 연출 · 측면";
+    if (value.endsWith("-contact")) return "탁자 연출 · 접촉 확대";
+  }
+  if (value.startsWith("wall-contact-side-")) return "벽 접촉 · 측면 확대";
+  return value || "캡처";
 }
 
 function roomChangeSummary(changes) {

@@ -47,6 +47,8 @@ namespace UnityDecoScene.DungeonDecorator.Editor
             session.CapturePaths.Add(Render(directory, "corner-b", cornerB, Quaternion.LookRotation((floorFocus - cornerB).normalized, Vector3.up), false, 5f, 58f, captureScene));
             foreach (var view in BuildWallContactViews(session))
                 session.CapturePaths.Add(Render(directory, view.Id, view.Position, view.Rotation, view.Orthographic, view.OrthographicSize, view.FieldOfView, captureScene));
+            foreach (var view in BuildSurfaceArrangementViews(session))
+                session.CapturePaths.Add(Render(directory, view.Id, view.Position, view.Rotation, view.Orthographic, view.OrthographicSize, view.FieldOfView, captureScene));
             return session.CapturePaths;
         }
 
@@ -149,7 +151,120 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         {
             var views = new List<CaptureView>(BuildFixedViews(session.Plan.Room));
             views.AddRange(BuildWallContactViews(session));
+            views.AddRange(BuildSurfaceArrangementViews(session));
             return views;
+        }
+
+        internal static string[] SurfaceArrangementViewIds(string arrangementId)
+        {
+            var source = string.IsNullOrWhiteSpace(arrangementId) ? "arrangement" : arrangementId.Trim();
+            var slug = new string(source.ToLowerInvariant()
+                .Select(value => char.IsLetterOrDigit(value) ? value : '-')
+                .ToArray()).Trim('-');
+            while (slug.Contains("--", StringComparison.Ordinal)) slug = slug.Replace("--", "-", StringComparison.Ordinal);
+            if (string.IsNullOrWhiteSpace(slug)) slug = "arrangement";
+            if (slug.Length > 18) slug = slug.Substring(0, 18).TrimEnd('-');
+            var suffix = Sha256(Encoding.UTF8.GetBytes(source)).Substring(0, 8);
+            var prefix = RoomCaptureViewIds.SurfaceArrangementPrefix + slug + "-" + suffix;
+            return new[]
+            {
+                prefix + RoomCaptureViewIds.ArrangementOverviewSuffix,
+                prefix + RoomCaptureViewIds.ArrangementTopSuffix,
+                prefix + RoomCaptureViewIds.ArrangementSideSuffix,
+                prefix + RoomCaptureViewIds.ArrangementContactSuffix
+            };
+        }
+
+        private static IEnumerable<CaptureView> BuildSurfaceArrangementViews(PreviewSession session)
+        {
+            var specs = session.Plan?.SurfaceArrangements;
+            if (specs == null) yield break;
+            var emitted = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var spec in specs.Where(value => value != null)
+                         .OrderBy(value => value.arrangement_id ?? string.Empty, StringComparer.Ordinal))
+            {
+                var target = session.Placements.Where(value => value != null &&
+                                                               string.Equals(value.elementId, spec.target_element_id, StringComparison.Ordinal))
+                    .OrderBy(value => value.placementId ?? string.Empty, StringComparer.Ordinal)
+                    .FirstOrDefault();
+                var members = session.Placements.Where(value => value != null &&
+                                                                 string.Equals(value.arrangementId, spec.arrangement_id, StringComparison.Ordinal))
+                    .OrderBy(value => value.stackLevel)
+                    .ThenBy(value => value.placementId ?? string.Empty, StringComparer.Ordinal)
+                    .ToArray();
+                if (target == null || members.Length == 0 ||
+                    !TryArrangementSurface(target, spec.TargetFrameId, out var surface)) continue;
+
+                var bounds = ResolvePlacementBounds(target);
+                foreach (var member in members) bounds.Encapsulate(ResolvePlacementBounds(member));
+                var focus = bounds.center;
+                focus.y = Mathf.Lerp(surface.Origin.y, bounds.max.y, 0.45f);
+                var planarSpan = Mathf.Max(surface.Size.x, surface.Size.y, bounds.size.x, bounds.size.z);
+                var distance = Mathf.Max(1.15f, planarSpan * 0.95f);
+                var ids = SurfaceArrangementViewIds(spec.arrangement_id);
+                if (ids.Any(id => !emitted.Add(id))) continue;
+
+                var diagonal = (surface.Tangent - surface.Bitangent + surface.Normal * 0.85f).normalized;
+                var overviewPosition = focus + diagonal * distance;
+                var overviewUp = Vector3.ProjectOnPlane(surface.Normal, focus - overviewPosition).normalized;
+                if (overviewUp.sqrMagnitude < 0.000001f) overviewUp = Vector3.up;
+                yield return new CaptureView(ids[0], overviewPosition,
+                    Quaternion.LookRotation((focus - overviewPosition).normalized, overviewUp), false, 5f, 48f);
+
+                var topPosition = focus + surface.Normal * (distance + Mathf.Max(0.75f, bounds.size.y));
+                var topUp = Vector3.ProjectOnPlane(surface.Bitangent, -surface.Normal).normalized;
+                if (topUp.sqrMagnitude < 0.000001f) topUp = Vector3.forward;
+                yield return new CaptureView(ids[1], topPosition,
+                    Quaternion.LookRotation(-surface.Normal, topUp), true,
+                    Mathf.Max(0.35f, Mathf.Max(surface.Size.x, surface.Size.y) * 0.62f), 45f);
+
+                var sidePosition = focus + surface.Tangent * (distance + 0.35f) + surface.Normal * Mathf.Max(0.08f, bounds.size.y * 0.08f);
+                var sideDirection = focus - sidePosition;
+                var sideUp = Vector3.ProjectOnPlane(surface.Normal, sideDirection).normalized;
+                if (sideUp.sqrMagnitude < 0.000001f) sideUp = Vector3.up;
+                yield return new CaptureView(ids[2], sidePosition,
+                    Quaternion.LookRotation(sideDirection.normalized, sideUp), true,
+                    Mathf.Max(0.35f, bounds.extents.y * 1.25f), 42f);
+
+                var contactMember = members.OrderBy(value => value.contactEvidence?.supportCoverage ?? 0f)
+                    .ThenByDescending(value => value.stackLevel)
+                    .ThenBy(value => value.placementId ?? string.Empty, StringComparer.Ordinal)
+                    .First();
+                var memberBounds = ResolvePlacementBounds(contactMember);
+                var contactPoint = contactMember.contactEvidence?.contactPoint ?? new Vector3(memberBounds.center.x, memberBounds.min.y, memberBounds.center.z);
+                var contactDistance = Mathf.Max(0.55f, memberBounds.extents.magnitude * 1.8f);
+                var contactPosition = contactPoint + surface.Tangent * contactDistance + surface.Normal * Mathf.Max(0.04f, memberBounds.extents.y * 0.2f);
+                var contactDirection = contactPoint - contactPosition;
+                var contactUp = Vector3.ProjectOnPlane(surface.Normal, contactDirection).normalized;
+                if (contactUp.sqrMagnitude < 0.000001f) contactUp = Vector3.up;
+                yield return new CaptureView(ids[3], contactPosition,
+                    Quaternion.LookRotation(contactDirection.normalized, contactUp), true,
+                    Mathf.Clamp(memberBounds.extents.magnitude * 1.15f, 0.18f, 0.8f), 38f);
+            }
+        }
+
+        private static bool TryArrangementSurface(PlacedDecorItem target, string frameId, out ArrangementSurface surface)
+        {
+            surface = default;
+            if (target?.descriptor?.Geometry == null) return false;
+            var frame = target.descriptor.Geometry.Frame(frameId);
+            if (frame == null) return false;
+            var normal = (target.rotation * frame.localNormal).normalized;
+            if (normal.sqrMagnitude < 0.9f || Vector3.Dot(normal, Vector3.up) < 0.95f) return false;
+            var localTangent = frame.localTangent.sqrMagnitude < 0.001f ? Vector3.right : frame.localTangent.normalized;
+            var localBitangent = Vector3.Cross(frame.localNormal.normalized, localTangent).normalized;
+            var tangentVector = target.rotation * Vector3.Scale(localTangent * frame.size.x, target.scale);
+            var bitangentVector = target.rotation * Vector3.Scale(localBitangent * frame.size.y, target.scale);
+            var tangent = Vector3.ProjectOnPlane(tangentVector, normal).normalized;
+            var bitangent = Vector3.ProjectOnPlane(bitangentVector, normal).normalized;
+            if (tangent.sqrMagnitude < 0.9f || bitangent.sqrMagnitude < 0.9f) return false;
+            surface = new ArrangementSurface(
+                target.position + target.rotation * Vector3.Scale(frame.localPoint, target.scale),
+                normal,
+                tangent,
+                bitangent,
+                new Vector2(tangentVector.magnitude, bitangentVector.magnitude));
+            return surface.Size.x > 0.001f && surface.Size.y > 0.001f;
         }
 
         private static IEnumerable<CaptureView> BuildWallContactViews(PreviewSession session)
@@ -495,6 +610,24 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 Orthographic = orthographic;
                 OrthographicSize = orthographicSize;
                 FieldOfView = fieldOfView;
+            }
+        }
+
+        private readonly struct ArrangementSurface
+        {
+            public readonly Vector3 Origin;
+            public readonly Vector3 Normal;
+            public readonly Vector3 Tangent;
+            public readonly Vector3 Bitangent;
+            public readonly Vector2 Size;
+
+            public ArrangementSurface(Vector3 origin, Vector3 normal, Vector3 tangent, Vector3 bitangent, Vector2 size)
+            {
+                Origin = origin;
+                Normal = normal;
+                Tangent = tangent;
+                Bitangent = bitangent;
+                Size = size;
             }
         }
     }

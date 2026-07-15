@@ -81,6 +81,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
                 technicalErrorCount = report.ErrorCount,
                 technicalErrorCodes = report.issues.Where(value => value.severity == ValidationSeverity.Error)
                     .Select(value => value.code ?? "UNKNOWN").Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray(),
+                arrangementEvidence = SurfaceArrangementReviewEvidenceService.Build(session, report),
                 reviewUrl = ReviewUrl
             };
 

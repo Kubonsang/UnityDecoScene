@@ -91,10 +91,14 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string preset;
         public int memberCount;
         public int stackCount;
+        public int maximumStackLevel;
         public float minimumSupport;
         public float minimumEdgeDistance;
         public string specHash;
         public string placementHash;
+        public string[] stackStructure = Array.Empty<string>();
+        public string[] errorCodes = Array.Empty<string>();
+        public string[] captureViewIds = Array.Empty<string>();
     }
 
     [Serializable]

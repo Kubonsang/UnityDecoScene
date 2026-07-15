@@ -127,6 +127,7 @@ namespace UnityDecoScene.DungeonDecorator.Editor
         public string technicalReportHash;
         public int technicalErrorCount;
         public string[] technicalErrorCodes = Array.Empty<string>();
+        public List<SpatialArrangementReviewEvidence> arrangementEvidence = new();
         public RoomReviewCapture capture = new();
         public RoomReviewDecision decision = new();
         public string reviewUrl;
